@@ -46,7 +46,11 @@ impl Collector {
             .filter(|s| !s.descriptor().default_enabled)
             .map(|s| s.descriptor().id.clone())
             .collect();
-        Collector { sources, disabled, rate: RateEngine::new() }
+        Collector {
+            sources,
+            disabled,
+            rate: RateEngine::new(),
+        }
     }
 
     /// Every registered source, whether or not it applies to the connected host.
@@ -70,7 +74,10 @@ impl Collector {
     ///
     /// Capability gating is what stops a BusyBox container from showing a grid of empty gauges for
     /// hardware it has no way to report on.
-    pub fn applicable<'a>(&'a self, caps: &'a Capabilities) -> impl Iterator<Item = &'a dyn Source> {
+    pub fn applicable<'a>(
+        &'a self,
+        caps: &'a Capabilities,
+    ) -> impl Iterator<Item = &'a dyn Source> {
         self.sources
             .iter()
             .map(AsRef::as_ref)
@@ -117,10 +124,20 @@ impl Collector {
             }
         }
 
-        let SampleSink { entities, descriptors, samples, .. } = sink;
+        let SampleSink {
+            entities,
+            descriptors,
+            samples,
+            ..
+        } = sink;
         let samples = self.rate.process(&descriptors, samples);
 
-        Tick { entities: dedup_entities(entities), descriptors, samples, errors }
+        Tick {
+            entities: dedup_entities(entities),
+            descriptors,
+            samples,
+            errors,
+        }
     }
 
     /// Drop remembered counter readings. Called on reconnect, where the host may have rebooted.
@@ -147,7 +164,10 @@ fn dedup_entities(entities: Vec<Entity>) -> Vec<Entity> {
         }
     }
 
-    order.into_iter().filter_map(|id| merged.remove(&id)).collect()
+    order
+        .into_iter()
+        .filter_map(|id| merged.remove(&id))
+        .collect()
 }
 
 #[cfg(test)]
@@ -208,7 +228,10 @@ mod tests {
 
         fn parse(&self, ctx: &TargetCtx, _r: &Responses, out: &mut SampleSink) -> ParseResult {
             if self.explode {
-                return Err(ParseError::new(&self.descriptor.id, "deliberate test failure"));
+                return Err(ParseError::new(
+                    &self.descriptor.id,
+                    "deliberate test failure",
+                ));
             }
             out.emit(
                 SeriesDescriptor::gauge(
@@ -225,7 +248,11 @@ mod tests {
     }
 
     fn ctx() -> TargetCtx {
-        let mut caps = Capabilities { clock_ticks: 100, cpu_count: 4, ..Default::default() };
+        let mut caps = Capabilities {
+            clock_ticks: 100,
+            cpu_count: 4,
+            ..Default::default()
+        };
         caps.binaries.insert("docker".into());
         caps.paths.insert("/proc/stat".into());
         TargetCtx {
@@ -246,7 +273,11 @@ mod tests {
         ]);
 
         let requests = collector.requests(&ctx());
-        assert_eq!(requests.len(), 3, "expected /proc/stat to be merged: {requests:#?}");
+        assert_eq!(
+            requests.len(),
+            3,
+            "expected /proc/stat to be merged: {requests:#?}"
+        );
         assert_eq!(requests[0], Request::read("/proc/stat"));
     }
 
@@ -271,8 +302,10 @@ mod tests {
         ]);
 
         let ctx = ctx();
-        let ids: Vec<_> =
-            collector.applicable(&ctx.caps).map(|s| s.descriptor().id.to_string()).collect();
+        let ids: Vec<_> = collector
+            .applicable(&ctx.caps)
+            .map(|s| s.descriptor().id.to_string())
+            .collect();
         assert_eq!(ids, vec!["present"]);
         assert_eq!(collector.requests(&ctx), vec![Request::read("/proc/stat")]);
     }
@@ -291,7 +324,10 @@ mod tests {
         assert_eq!(collector.requests(&ctx()).len(), 2);
 
         collector.set_enabled(&SourceId::new("cheap"), false);
-        assert_eq!(collector.requests(&ctx()), vec![Request::read("/proc/everything")]);
+        assert_eq!(
+            collector.requests(&ctx()),
+            vec![Request::read("/proc/everything")]
+        );
     }
 
     /// One broken parser must cost only its own metrics.
@@ -305,7 +341,11 @@ mod tests {
 
         let tick = collector.collect(&ctx(), &Responses::default(), 1_000);
 
-        assert_eq!(tick.samples.len(), 2, "a failing parser took its neighbours down with it");
+        assert_eq!(
+            tick.samples.len(),
+            2,
+            "a failing parser took its neighbours down with it"
+        );
         assert_eq!(tick.errors.len(), 1);
         assert_eq!(tick.errors[0].source, SourceId::new("broken"));
     }

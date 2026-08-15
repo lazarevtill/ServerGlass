@@ -84,8 +84,10 @@ mod tests {
         for source in builtin_sources() {
             let out = testing::sink_for(source.as_ref(), &ctx, &responses);
             for descriptor in &out.descriptors {
-                let previous = owners
-                    .insert(descriptor.id.to_string(), source.descriptor().id.to_string());
+                let previous = owners.insert(
+                    descriptor.id.to_string(),
+                    source.descriptor().id.to_string(),
+                );
                 if let Some(previous) = previous {
                     assert_eq!(
                         previous,
@@ -96,7 +98,10 @@ mod tests {
                 }
             }
         }
-        assert!(!owners.is_empty(), "no series were produced from the corpus");
+        assert!(
+            !owners.is_empty(),
+            "no series were produced from the corpus"
+        );
     }
 
     /// Every sample must have a descriptor, or the UI receives a value it cannot label or scale.
@@ -193,6 +198,9 @@ mod tests {
             "a refresh would fetch {} distinct things: {all:#?}",
             unique.len()
         );
-        assert!(all.iter().all(|r| r.is_remote()), "no built-in should need app-side HTTP");
+        assert!(
+            all.iter().all(|r| r.is_remote()),
+            "no built-in should need app-side HTTP"
+        );
     }
 }

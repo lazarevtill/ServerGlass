@@ -12,10 +12,18 @@ pub enum TransportError {
     },
 
     #[error("host key for {host}:{port} is not in known_hosts")]
-    UnknownHostKey { host: String, port: u16, fingerprint: String },
+    UnknownHostKey {
+        host: String,
+        port: u16,
+        fingerprint: String,
+    },
 
     #[error("host key for {host}:{port} CHANGED — possible interception (now {fingerprint})")]
-    HostKeyMismatch { host: String, port: u16, fingerprint: String },
+    HostKeyMismatch {
+        host: String,
+        port: u16,
+        fingerprint: String,
+    },
 
     #[error("authentication failed for {user}@{host}")]
     AuthFailed { user: String, host: String },

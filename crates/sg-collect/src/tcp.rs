@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use sg_model::{
-    EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor, Source,
-    SourceDescriptor, SourceId, TargetCtx, Unit,
+    EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor,
+    Source, SourceDescriptor, SourceId, TargetCtx, Unit,
 };
 
 /// Parse `/proc/net/sockstat`, whose lines look like `TCP: inuse 6 orphan 0 tw 0 alloc 9 mem 1`.
@@ -14,7 +14,9 @@ pub fn parse_sockstat(text: &str) -> HashMap<String, HashMap<String, u64>> {
     let mut out: HashMap<String, HashMap<String, u64>> = HashMap::new();
 
     for line in text.lines() {
-        let Some((proto, rest)) = line.split_once(':') else { continue };
+        let Some((proto, rest)) = line.split_once(':') else {
+            continue;
+        };
         let fields: Vec<&str> = rest.split_whitespace().collect();
         let entry = out.entry(proto.trim().to_string()).or_default();
         // Fields come in name/value pairs; a trailing unpaired name is ignored.
@@ -37,7 +39,9 @@ pub fn parse_snmp(text: &str) -> HashMap<String, HashMap<String, i64>> {
     let mut headers: HashMap<String, Vec<String>> = HashMap::new();
 
     for line in text.lines() {
-        let Some((proto, rest)) = line.split_once(':') else { continue };
+        let Some((proto, rest)) = line.split_once(':') else {
+            continue;
+        };
         let proto = proto.trim().to_string();
         let fields: Vec<&str> = rest.split_whitespace().collect();
 
@@ -125,11 +129,19 @@ impl Source for TcpSource {
         }
 
         if let Some(snmp) = responses.text(&Self::snmp()).map(parse_snmp) {
-            let Some(tcp) = snmp.get("Tcp") else { return Ok(()) };
+            let Some(tcp) = snmp.get("Tcp") else {
+                return Ok(());
+            };
 
             if let Some(established) = tcp.get("CurrEstab") {
                 out.emit(
-                    SeriesDescriptor::gauge(id, host, "tcp_established", "Established", Unit::Count),
+                    SeriesDescriptor::gauge(
+                        id,
+                        host,
+                        "tcp_established",
+                        "Established",
+                        Unit::Count,
+                    ),
                     *established,
                 );
             }
@@ -200,26 +212,40 @@ mod tests {
             .build();
         let out = sink_for(&TcpSource::default(), &ctx, &responses);
 
-        assert_eq!(value_of(&out, "tcp_in_segs"), None, "a negative counter is malformed input");
+        assert_eq!(
+            value_of(&out, "tcp_in_segs"),
+            None,
+            "a negative counter is malformed input"
+        );
         assert_eq!(value_of(&out, "tcp_retrans"), Some(3.0));
     }
 
     #[test]
     fn reads_both_corpora() {
         for host in HOSTS {
-            let (ctx, responses) =
-                corpus(host).file("/proc/net/sockstat").file("/proc/net/snmp").build();
+            let (ctx, responses) = corpus(host)
+                .file("/proc/net/sockstat")
+                .file("/proc/net/snmp")
+                .build();
             let out = sink_for(&TcpSource::default(), &ctx, &responses);
 
-            assert!(value_of(&out, "tcp_inuse").is_some(), "{host}: no TCP socket count");
-            assert!(value_of(&out, "tcp_in_segs").is_some(), "{host}: no TCP segment counters");
+            assert!(
+                value_of(&out, "tcp_inuse").is_some(),
+                "{host}: no TCP socket count"
+            );
+            assert!(
+                value_of(&out, "tcp_in_segs").is_some(),
+                "{host}: no TCP segment counters"
+            );
         }
     }
 
     #[test]
     fn one_missing_file_does_not_suppress_the_other() {
-        let (ctx, responses) =
-            corpus("debian").file("/proc/net/sockstat").missing("/proc/net/snmp").build();
+        let (ctx, responses) = corpus("debian")
+            .file("/proc/net/sockstat")
+            .missing("/proc/net/snmp")
+            .build();
         let out = sink_for(&TcpSource::default(), &ctx, &responses);
 
         assert!(value_of(&out, "tcp_inuse").is_some());

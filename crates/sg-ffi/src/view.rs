@@ -40,12 +40,20 @@ impl From<&TargetState> for ConnectionState {
             TargetState::Idle => ConnectionState::Idle,
             TargetState::Connecting => ConnectionState::Connecting,
             TargetState::Online => ConnectionState::Online,
-            TargetState::Reconnecting { attempt, retry_in_ms } => {
-                ConnectionState::Reconnecting { attempt: *attempt, retry_in_ms: *retry_in_ms }
-            }
-            TargetState::Failed { message, recoverable } => {
-                ConnectionState::Failed { message: message.clone(), recoverable: *recoverable }
-            }
+            TargetState::Reconnecting {
+                attempt,
+                retry_in_ms,
+            } => ConnectionState::Reconnecting {
+                attempt: *attempt,
+                retry_in_ms: *retry_in_ms,
+            },
+            TargetState::Failed {
+                message,
+                recoverable,
+            } => ConnectionState::Failed {
+                message: message.clone(),
+                recoverable: *recoverable,
+            },
         }
     }
 }
@@ -219,7 +227,10 @@ fn group_title(source: &str) -> Option<&'static str> {
 
 /// Rank within [`DETAIL_ORDER`], with unlisted metrics after the listed ones.
 fn detail_rank(metric: &str) -> usize {
-    DETAIL_ORDER.iter().position(|m| *m == metric).unwrap_or(DETAIL_ORDER.len())
+    DETAIL_ORDER
+        .iter()
+        .position(|m| *m == metric)
+        .unwrap_or(DETAIL_ORDER.len())
 }
 
 fn gauge_from(descriptor: &SeriesDescriptor, store: &LiveStore) -> Option<MetricGauge> {
@@ -238,7 +249,11 @@ fn gauge_from(descriptor: &SeriesDescriptor, store: &LiveStore) -> Option<Metric
         max: descriptor.display_max(),
         unit_suffix: unit.suffix().to_string(),
         binary_scaled: unit.is_binary_scaled(),
-        history: store.history_vec(&descriptor.id).into_iter().map(|p| p.value).collect(),
+        history: store
+            .history_vec(&descriptor.id)
+            .into_iter()
+            .map(|p| p.value)
+            .collect(),
     })
 }
 
@@ -251,7 +266,12 @@ pub fn host_gauges(store: &LiveStore, host: &EntityId) -> Vec<MetricGauge> {
         .filter_map(|d| gauge_from(d, store))
         .collect();
 
-    gauges.sort_by_key(|g| HEADLINE.iter().position(|m| *m == g.metric).unwrap_or(usize::MAX));
+    gauges.sort_by_key(|g| {
+        HEADLINE
+            .iter()
+            .position(|m| *m == g.metric)
+            .unwrap_or(usize::MAX)
+    });
     gauges
 }
 
@@ -267,22 +287,36 @@ pub fn host_details(store: &LiveStore, host: &EntityId) -> Vec<DetailGroup> {
         if HEADLINE.contains(&descriptor.metric.as_str()) {
             continue;
         }
-        let Some(title) = group_title(descriptor.source.as_str()) else { continue };
-        let Some(gauge) = gauge_from(descriptor, store) else { continue };
+        let Some(title) = group_title(descriptor.source.as_str()) else {
+            continue;
+        };
+        let Some(gauge) = gauge_from(descriptor, store) else {
+            continue;
+        };
 
         match groups.iter_mut().find(|g| g.title == title) {
             Some(group) => group.gauges.push(gauge),
-            None => groups.push(DetailGroup { title: title.to_string(), gauges: vec![gauge] }),
+            None => groups.push(DetailGroup {
+                title: title.to_string(),
+                gauges: vec![gauge],
+            }),
         }
     }
 
     for group in &mut groups {
         group.gauges.sort_by(|a, b| {
-            detail_rank(&a.metric).cmp(&detail_rank(&b.metric)).then(a.metric.cmp(&b.metric))
+            detail_rank(&a.metric)
+                .cmp(&detail_rank(&b.metric))
+                .then(a.metric.cmp(&b.metric))
         });
     }
     // Same ordering rule for the sections themselves: by their first metric's rank.
-    groups.sort_by_key(|g| g.gauges.first().map(|x| detail_rank(&x.metric)).unwrap_or(usize::MAX));
+    groups.sort_by_key(|g| {
+        g.gauges
+            .first()
+            .map(|x| detail_rank(&x.metric))
+            .unwrap_or(usize::MAX)
+    });
     groups
 }
 
@@ -318,9 +352,9 @@ pub fn format_value(value: f64, unit_suffix: &str, binary_scaled: bool) -> Strin
         format!("{signed:.digits$} {}B{tail}", PREFIXES[index])
     } else if unit_suffix == "%" {
         format!("{value:.1}%")
-    } else if value.abs() >= 1000.0 {
-        format!("{value:.0} {unit_suffix}").trim_end().to_string()
-    } else if value.fract() == 0.0 {
+    } else if value.abs() >= 1000.0 || value.fract() == 0.0 {
+        // Large values and whole numbers both read better without a decimal tail: "12345 " not
+        // "12345.00 ", and "7" not "7.00".
         format!("{value:.0} {unit_suffix}").trim_end().to_string()
     } else {
         format!("{value:.2} {unit_suffix}").trim_end().to_string()
@@ -330,7 +364,11 @@ pub fn format_value(value: f64, unit_suffix: &str, binary_scaled: bool) -> Strin
 /// Format a duration in seconds as `12d 4h`, for uptime.
 pub fn format_uptime(seconds: f64) -> String {
     let total = seconds.max(0.0) as u64;
-    let (days, hours, minutes) = (total / 86_400, (total % 86_400) / 3_600, (total % 3_600) / 60);
+    let (days, hours, minutes) = (
+        total / 86_400,
+        (total % 86_400) / 3_600,
+        (total % 3_600) / 60,
+    );
     match (days, hours) {
         (0, 0) => format!("{minutes}m"),
         (0, _) => format!("{hours}h {minutes}m"),
@@ -402,7 +440,7 @@ mod tests {
     #[test]
     fn formats_percentages_to_one_decimal() {
         assert_eq!(format_value(42.0, "%", false), "42.0%");
-        assert_eq!(format_value(3.14159, "%", false), "3.1%");
+        assert_eq!(format_value(3.16159, "%", false), "3.2%");
         assert_eq!(format_value(100.0, "%", false), "100.0%");
     }
 
@@ -419,7 +457,11 @@ mod tests {
         assert_eq!(format_uptime(3_600.0), "1h 0m");
         assert_eq!(format_uptime(3_660.0), "1h 1m");
         assert_eq!(format_uptime(90_000.0), "1d 1h");
-        assert_eq!(format_uptime(-5.0), "0m", "a negative uptime must not underflow");
+        assert_eq!(
+            format_uptime(-5.0),
+            "0m",
+            "a negative uptime must not underflow"
+        );
     }
 
     /// Build a store holding the host-level series a real Proxmox host produced.
@@ -429,29 +471,54 @@ mod tests {
 
         // (source, metric) pairs taken from an actual 20-core Proxmox run.
         let series = [
-            ("proc.cpu", "cpu_usage"), ("proc.cpu", "cpu_user"), ("proc.cpu", "cpu_system"),
-            ("proc.cpu", "cpu_iowait"), ("proc.cpu", "cpu_steal"), ("proc.cpu", "ctx_switches"),
-            ("proc.cpu", "procs_running"), ("proc.cpu", "procs_blocked"),
-            ("proc.memory", "mem_usage"), ("proc.memory", "mem_total"),
-            ("proc.memory", "mem_used"), ("proc.memory", "mem_available"),
-            ("proc.memory", "mem_free"), ("proc.memory", "mem_cached"),
-            ("proc.memory", "mem_buffers"), ("proc.memory", "swap_usage"),
-            ("proc.memory", "swap_total"), ("proc.memory", "swap_used"),
-            ("proc.load", "load1"), ("proc.load", "load5"), ("proc.load", "load15"),
-            ("proc.load", "procs_total"), ("proc.load", "uptime"),
-            ("proc.diskio", "disk_read"), ("proc.diskio", "disk_write"),
-            ("proc.network", "net_rx"), ("proc.network", "net_tx"),
+            ("proc.cpu", "cpu_usage"),
+            ("proc.cpu", "cpu_user"),
+            ("proc.cpu", "cpu_system"),
+            ("proc.cpu", "cpu_iowait"),
+            ("proc.cpu", "cpu_steal"),
+            ("proc.cpu", "ctx_switches"),
+            ("proc.cpu", "procs_running"),
+            ("proc.cpu", "procs_blocked"),
+            ("proc.memory", "mem_usage"),
+            ("proc.memory", "mem_total"),
+            ("proc.memory", "mem_used"),
+            ("proc.memory", "mem_available"),
+            ("proc.memory", "mem_free"),
+            ("proc.memory", "mem_cached"),
+            ("proc.memory", "mem_buffers"),
+            ("proc.memory", "swap_usage"),
+            ("proc.memory", "swap_total"),
+            ("proc.memory", "swap_used"),
+            ("proc.load", "load1"),
+            ("proc.load", "load5"),
+            ("proc.load", "load15"),
+            ("proc.load", "procs_total"),
+            ("proc.load", "uptime"),
+            ("proc.diskio", "disk_read"),
+            ("proc.diskio", "disk_write"),
+            ("proc.network", "net_rx"),
+            ("proc.network", "net_tx"),
             ("proc.filesystem", "disk_usage"),
-            ("proc.tcp", "sockets"), ("proc.tcp", "tcp_established"), ("proc.tcp", "tcp_inuse"),
-            ("proc.tcp", "tcp_timewait"), ("proc.tcp", "tcp_orphan"), ("proc.tcp", "udp_inuse"),
-            ("proc.tcp", "tcp_in_segs"), ("proc.tcp", "tcp_out_segs"),
-            ("proc.tcp", "tcp_retrans"), ("proc.tcp", "tcp_active_opens"),
+            ("proc.tcp", "sockets"),
+            ("proc.tcp", "tcp_established"),
+            ("proc.tcp", "tcp_inuse"),
+            ("proc.tcp", "tcp_timewait"),
+            ("proc.tcp", "tcp_orphan"),
+            ("proc.tcp", "udp_inuse"),
+            ("proc.tcp", "tcp_in_segs"),
+            ("proc.tcp", "tcp_out_segs"),
+            ("proc.tcp", "tcp_retrans"),
+            ("proc.tcp", "tcp_active_opens"),
             ("proc.tcp", "tcp_passive_opens"),
         ];
 
         for (source, metric) in series {
             let d = SeriesDescriptor::gauge(
-                &SourceId::new(source), &host.id, metric, metric, Unit::Count,
+                &SourceId::new(source),
+                &host.id,
+                metric,
+                metric,
+                Unit::Count,
             );
             store.ingest(
                 vec![host.clone()],
@@ -468,13 +535,23 @@ mod tests {
     #[test]
     fn the_headline_grid_is_curated_not_merely_ordered() {
         let (store, host) = proxmox_like_store();
-        let headline: Vec<_> =
-            host_gauges(&store, &host.id).into_iter().map(|g| g.metric).collect();
+        let headline: Vec<_> = host_gauges(&store, &host.id)
+            .into_iter()
+            .map(|g| g.metric)
+            .collect();
 
         assert_eq!(
             headline,
-            vec!["cpu_usage", "mem_usage", "disk_usage", "swap_usage", "load1", "net_rx",
-                 "net_tx", "uptime"],
+            vec![
+                "cpu_usage",
+                "mem_usage",
+                "disk_usage",
+                "swap_usage",
+                "load1",
+                "net_rx",
+                "net_tx",
+                "uptime"
+            ],
             "the status grid must be a summary, not every series the host publishes"
         );
     }
@@ -484,18 +561,26 @@ mod tests {
     fn every_host_series_is_either_headline_or_grouped() {
         let (store, host) = proxmox_like_store();
 
-        let mut shown: Vec<String> =
-            host_gauges(&store, &host.id).into_iter().map(|g| g.metric).collect();
+        let mut shown: Vec<String> = host_gauges(&store, &host.id)
+            .into_iter()
+            .map(|g| g.metric)
+            .collect();
         for group in host_details(&store, &host.id) {
             shown.extend(group.gauges.into_iter().map(|g| g.metric));
         }
         shown.sort();
 
-        let mut published: Vec<String> =
-            store.series_for(&host.id).into_iter().map(|d| d.metric.clone()).collect();
+        let mut published: Vec<String> = store
+            .series_for(&host.id)
+            .into_iter()
+            .map(|d| d.metric.clone())
+            .collect();
         published.sort();
 
-        assert_eq!(shown, published, "curation dropped metrics instead of relocating them");
+        assert_eq!(
+            shown, published,
+            "curation dropped metrics instead of relocating them"
+        );
     }
 
     /// Sorting detail metrics by name renders load averages as 1, 15, 5 — which is the order the
@@ -505,7 +590,10 @@ mod tests {
         let (store, host) = proxmox_like_store();
         let groups = host_details(&store, &host.id);
 
-        let load = groups.iter().find(|g| g.title == "Load & processes").expect("load group");
+        let load = groups
+            .iter()
+            .find(|g| g.title == "Load & processes")
+            .expect("load group");
         let metrics: Vec<_> = load.gauges.iter().map(|g| g.metric.as_str()).collect();
         let position = |m: &str| metrics.iter().position(|x| *x == m).unwrap();
 
@@ -521,14 +609,24 @@ mod tests {
 
         let titles: Vec<_> = groups.iter().map(|g| g.title.as_str()).collect();
         for expected in ["CPU", "Memory", "Load & processes", "Sockets & TCP"] {
-            assert!(titles.contains(&expected), "missing group {expected}: {titles:?}");
+            assert!(
+                titles.contains(&expected),
+                "missing group {expected}: {titles:?}"
+            );
         }
         // Filesystems have their own per-mount cards; a flat duplicate list would be noise.
-        assert!(!titles.contains(&"Other"), "an ungrouped collector leaked into the UI");
+        assert!(
+            !titles.contains(&"Other"),
+            "an ungrouped collector leaked into the UI"
+        );
 
         let memory = groups.iter().find(|g| g.title == "Memory").unwrap();
         let metrics: Vec<_> = memory.gauges.iter().map(|g| g.metric.as_str()).collect();
-        assert_eq!(metrics.first(), Some(&"mem_total"), "memory should read total first: {metrics:?}");
+        assert_eq!(
+            metrics.first(),
+            Some(&"mem_total"),
+            "memory should read total first: {metrics:?}"
+        );
         assert!(
             metrics.iter().position(|m| *m == "mem_used").unwrap()
                 < metrics.iter().position(|m| *m == "mem_free").unwrap()
@@ -551,8 +649,10 @@ mod tests {
             );
         }
 
-        let order: Vec<_> =
-            host_gauges(&store, &host.id).into_iter().map(|g| g.metric).collect();
+        let order: Vec<_> = host_gauges(&store, &host.id)
+            .into_iter()
+            .map(|g| g.metric)
+            .collect();
         assert_eq!(order, vec!["cpu_usage", "mem_usage", "net_rx", "uptime"]);
 
         // A metric outside the headline set is relocated, not discarded.
@@ -586,8 +686,16 @@ mod tests {
 
         let gauge = host_gauges(&store, &host.id).remove(0);
         assert_eq!(gauge.value, 30.0, "the gauge shows the latest value");
-        assert_eq!(gauge.history, vec![10.0, 20.0, 30.0], "oldest first, for the sparkline");
-        assert_eq!(gauge.max, Some(100.0), "a percentage has an inherent maximum");
+        assert_eq!(
+            gauge.history,
+            vec![10.0, 20.0, 30.0],
+            "oldest first, for the sparkline"
+        );
+        assert_eq!(
+            gauge.max,
+            Some(100.0),
+            "a percentage has an inherent maximum"
+        );
         assert_eq!(gauge.unit_suffix, "%");
     }
 
@@ -606,7 +714,11 @@ mod tests {
         let spec = connection_spec(&config);
 
         assert_eq!(spec.port, 22, "port 0 should fall back to the SSH default");
-        assert_eq!(spec.auth.describe(), "ssh-agent", "unknown auth must not silently weaken");
+        assert_eq!(
+            spec.auth.describe(),
+            "ssh-agent",
+            "unknown auth must not silently weaken"
+        );
         assert_eq!(
             spec.host_key_policy,
             sg_transport::HostKeyPolicy::Strict,
@@ -632,6 +744,12 @@ mod tests {
         assert_eq!(spec.auth.describe(), "key /tmp/id");
         assert_eq!(spec.host_key_policy, sg_transport::HostKeyPolicy::AcceptNew);
         // An empty passphrase must become None, not Some(""), or key loading fails.
-        assert!(matches!(spec.auth, sg_transport::Auth::KeyFile { passphrase: None, .. }));
+        assert!(matches!(
+            spec.auth,
+            sg_transport::Auth::KeyFile {
+                passphrase: None,
+                ..
+            }
+        ));
     }
 }

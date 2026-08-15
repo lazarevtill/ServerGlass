@@ -6,8 +6,8 @@
 //! of needing a per-distribution branch.
 
 use sg_model::{
-    Entity, EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor,
-    Source, SourceDescriptor, SourceId, TargetCtx, Unit,
+    Entity, EntityKind, ParseResult, Request, Requirements, Responses, SampleSink,
+    SeriesDescriptor, Source, SourceDescriptor, SourceId, TargetCtx, Unit,
 };
 
 /// One row of `df -P -k`, in bytes.
@@ -56,7 +56,12 @@ pub fn parse_df(text: &str) -> Vec<Filesystem> {
         if fields.len() < 6 {
             continue;
         }
-        let kib = |i: usize| fields[i].parse::<u64>().ok().map(|v| v.saturating_mul(1024));
+        let kib = |i: usize| {
+            fields[i]
+                .parse::<u64>()
+                .ok()
+                .map(|v| v.saturating_mul(1024))
+        };
         let (Some(total), Some(used), Some(available)) = (kib(1), kib(2), kib(3)) else {
             continue;
         };
@@ -110,7 +115,9 @@ impl Source for FilesystemSource {
     }
 
     fn parse(&self, ctx: &TargetCtx, responses: &Responses, out: &mut SampleSink) -> ParseResult {
-        let Some(text) = responses.text(&Self::request()) else { return Ok(()) };
+        let Some(text) = responses.text(&Self::request()) else {
+            return Ok(());
+        };
         let id = &self.descriptor.id;
 
         let mut root_usage = None;
@@ -136,7 +143,10 @@ impl Source for FilesystemSource {
                     .with_max(fs.total as f64),
                 fs.used,
             );
-            out.emit(SeriesDescriptor::gauge(id, &entity.id, "total", "Total", Unit::Bytes), fs.total);
+            out.emit(
+                SeriesDescriptor::gauge(id, &entity.id, "total", "Total", Unit::Bytes),
+                fs.total,
+            );
             out.emit(
                 SeriesDescriptor::gauge(id, &entity.id, "available", "Available", Unit::Bytes),
                 fs.available,
@@ -211,12 +221,13 @@ none                     0        0         0       0% /proc/sys
 
     #[test]
     fn ignores_zero_sized_and_malformed_rows() {
-        let (ctx, responses) = corpus("debian")
-            .exec(&["df", "-P", "-k"], "df-P-k")
-            .build();
+        let (ctx, responses) = corpus("debian").exec(&["df", "-P", "-k"], "df-P-k").build();
         let _ = sink_for(&FilesystemSource::default(), &ctx, &responses);
 
-        assert!(parse_df("Filesystem 1024-blocks Used Available Capacity Mounted on\nbroken row\n").is_empty());
+        assert!(parse_df(
+            "Filesystem 1024-blocks Used Available Capacity Mounted on\nbroken row\n"
+        )
+        .is_empty());
         assert!(parse_df("").is_empty());
     }
 
@@ -245,7 +256,10 @@ none                     0        0         0       0% /proc/sys
                 "{host}: root filesystem missing from {:?}",
                 out.entities.iter().map(|e| &e.display).collect::<Vec<_>>()
             );
-            assert!(value_of(&out, "disk_usage").is_some(), "{host}: no host disk usage");
+            assert!(
+                value_of(&out, "disk_usage").is_some(),
+                "{host}: no host disk usage"
+            );
         }
     }
 }

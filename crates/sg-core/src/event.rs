@@ -15,9 +15,15 @@ pub enum TargetState {
     /// Connected and collecting.
     Online,
     /// Lost the connection; the scheduler will retry after `retry_in_ms`.
-    Reconnecting { attempt: u32, retry_in_ms: u64 },
+    Reconnecting {
+        attempt: u32,
+        retry_in_ms: u64,
+    },
     /// Stopped for a reason retrying cannot fix — bad credentials, a changed host key.
-    Failed { message: String, recoverable: bool },
+    Failed {
+        message: String,
+        recoverable: bool,
+    },
 }
 
 impl TargetState {
@@ -29,11 +35,20 @@ impl TargetState {
 /// Emitted by the core, consumed by whichever UI is attached.
 #[derive(Clone, Debug)]
 pub enum Event {
-    StateChanged { target: TargetId, state: TargetState },
+    StateChanged {
+        target: TargetId,
+        state: TargetState,
+    },
     /// Capability detection finished. The UI can now show which sources apply to this host.
-    CapabilitiesDetected { target: TargetId, capabilities: Box<Capabilities> },
+    CapabilitiesDetected {
+        target: TargetId,
+        capabilities: Box<Capabilities>,
+    },
     /// The entity tree changed — a container started, a disk appeared.
-    EntitiesChanged { target: TargetId, entities: Vec<Entity> },
+    EntitiesChanged {
+        target: TargetId,
+        entities: Vec<Entity>,
+    },
     /// One refresh's worth of readings, with rates already derived.
     Samples {
         target: TargetId,
@@ -42,7 +57,11 @@ pub enum Event {
     },
     /// A collector failed to parse something the host returned. Surfaced rather than swallowed,
     /// but never fatal.
-    SourceError { target: TargetId, source: String, message: String },
+    SourceError {
+        target: TargetId,
+        source: String,
+        message: String,
+    },
 }
 
 impl Event {
@@ -65,7 +84,11 @@ mod tests {
     fn only_online_counts_as_online() {
         assert!(TargetState::Online.is_online());
         assert!(!TargetState::Connecting.is_online());
-        assert!(!TargetState::Reconnecting { attempt: 1, retry_in_ms: 1000 }.is_online());
+        assert!(!TargetState::Reconnecting {
+            attempt: 1,
+            retry_in_ms: 1000
+        }
+        .is_online());
         assert!(!TargetState::Idle.is_online());
     }
 
@@ -73,12 +96,18 @@ mod tests {
     fn every_event_carries_its_target() {
         let target = TargetId::new("t1");
         let events = [
-            Event::StateChanged { target: target.clone(), state: TargetState::Online },
+            Event::StateChanged {
+                target: target.clone(),
+                state: TargetState::Online,
+            },
             Event::CapabilitiesDetected {
                 target: target.clone(),
                 capabilities: Box::default(),
             },
-            Event::EntitiesChanged { target: target.clone(), entities: vec![] },
+            Event::EntitiesChanged {
+                target: target.clone(),
+                entities: vec![],
+            },
             Event::Samples {
                 target: target.clone(),
                 descriptors: vec![],

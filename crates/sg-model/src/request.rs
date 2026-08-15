@@ -49,11 +49,17 @@ impl Request {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        Request::Exec { argv: argv.into_iter().map(Into::into).collect() }
+        Request::Exec {
+            argv: argv.into_iter().map(Into::into).collect(),
+        }
     }
 
     pub fn get(url: impl Into<String>) -> Self {
-        Request::Http { url: url.into(), method: "GET".into(), headers: Vec::new() }
+        Request::Http {
+            url: url.into(),
+            method: "GET".into(),
+            headers: Vec::new(),
+        }
     }
 
     /// Whether this request is executed against the monitored host (versus from the app itself).
@@ -95,7 +101,11 @@ impl Request {
                     feed(b"\0");
                 }
             }
-            Request::Http { url, method, headers } => {
+            Request::Http {
+                url,
+                method,
+                headers,
+            } => {
                 feed(b"h\0");
                 feed(method.as_bytes());
                 feed(url.as_bytes());
@@ -120,11 +130,17 @@ pub struct Response {
 
 impl Response {
     pub fn ok(body: impl Into<String>) -> Self {
-        Response { exit_code: 0, body: body.into() }
+        Response {
+            exit_code: 0,
+            body: body.into(),
+        }
     }
 
     pub fn failed(exit_code: i32) -> Self {
-        Response { exit_code, body: String::new() }
+        Response {
+            exit_code,
+            body: String::new(),
+        }
     }
 
     pub fn is_ok(&self) -> bool {
@@ -151,7 +167,10 @@ impl Responses {
     /// `let Some(text) = r.text(&req) else { return Ok(()) };` — a source silently produces
     /// nothing on hosts where its data does not exist, which is the desired behaviour.
     pub fn text(&self, request: &Request) -> Option<&str> {
-        self.0.get(&request.id()).filter(|r| r.is_ok()).map(|r| r.body.as_str())
+        self.0
+            .get(&request.id())
+            .filter(|r| r.is_ok())
+            .map(|r| r.body.as_str())
     }
 
     pub fn len(&self) -> usize {

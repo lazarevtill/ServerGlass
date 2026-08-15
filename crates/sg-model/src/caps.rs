@@ -88,14 +88,23 @@ pub struct Requirements {
 }
 
 impl Requirements {
-    pub const NONE: Requirements = Requirements { binaries: Vec::new(), paths: Vec::new() };
+    pub const NONE: Requirements = Requirements {
+        binaries: Vec::new(),
+        paths: Vec::new(),
+    };
 
     pub fn binary(name: impl Into<String>) -> Self {
-        Requirements { binaries: vec![name.into()], paths: Vec::new() }
+        Requirements {
+            binaries: vec![name.into()],
+            paths: Vec::new(),
+        }
     }
 
     pub fn path(path: impl Into<String>) -> Self {
-        Requirements { binaries: Vec::new(), paths: vec![path.into()] }
+        Requirements {
+            binaries: Vec::new(),
+            paths: vec![path.into()],
+        }
     }
 
     pub fn satisfied_by(&self, caps: &Capabilities) -> bool {

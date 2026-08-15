@@ -9,9 +9,27 @@ use sg_model::{Capabilities, CgroupVersion, Coreutils, Request, Responses};
 
 /// Programs worth knowing about. Presence of each gates one or more sources.
 pub const PROBED_BINARIES: &[&str] = &[
-    "busybox", "docker", "podman", "kubectl", "nvidia-smi", "rocm-smi", "smartctl", "zpool",
-    "mdadm", "systemctl", "journalctl", "ss", "ip", "lsblk", "virsh", "qm", "upsc", "sensors",
-    "fail2ban-client", "nft", "iptables",
+    "busybox",
+    "docker",
+    "podman",
+    "kubectl",
+    "nvidia-smi",
+    "rocm-smi",
+    "smartctl",
+    "zpool",
+    "mdadm",
+    "systemctl",
+    "journalctl",
+    "ss",
+    "ip",
+    "lsblk",
+    "virsh",
+    "qm",
+    "upsc",
+    "sensors",
+    "fail2ban-client",
+    "nft",
+    "iptables",
 ];
 
 /// Paths whose readability gates one or more sources.
@@ -120,7 +138,10 @@ pub fn requests() -> Vec<Request> {
 /// gates every source off rather than producing a screen of zeroes.
 pub fn parse(responses: &Responses) -> Capabilities {
     let line = |req: Request| {
-        responses.text(&req).map(|t| t.trim().to_string()).filter(|s| !s.is_empty())
+        responses
+            .text(&req)
+            .map(|t| t.trim().to_string())
+            .filter(|s| !s.is_empty())
     };
 
     let mut caps = Capabilities {
@@ -136,15 +157,29 @@ pub fn parse(responses: &Responses) -> Capabilities {
             // 100 is right on essentially every Linux build; falling back to it beats emitting
             // zeroed CPU percentages on a host whose getconf is missing.
             .unwrap_or(100),
-        page_size: line(page_size_request()).and_then(|s| s.parse().ok()).unwrap_or(4096),
+        page_size: line(page_size_request())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(4096),
         cpu_count: responses.text(&stat_request()).map(count_cpus).unwrap_or(0),
         binaries: responses
             .text(&binaries_request())
-            .map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+            .map(|t| {
+                t.lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default(),
         paths: responses
             .text(&paths_request())
-            .map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+            .map(|t| {
+                t.lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default(),
         coreutils: Coreutils::Unknown,
         cgroup: CgroupVersion::Unknown,
@@ -180,9 +215,7 @@ fn parse_pretty_name(os_release: &str) -> Option<String> {
 /// Count `cpuN` lines in `/proc/stat`, excluding the leading aggregate `cpu ` line.
 fn count_cpus(stat: &str) -> u32 {
     stat.lines()
-        .filter(|l| {
-            l.starts_with("cpu") && l.as_bytes().get(3).is_some_and(u8::is_ascii_digit)
-        })
+        .filter(|l| l.starts_with("cpu") && l.as_bytes().get(3).is_some_and(u8::is_ascii_digit))
         .count() as u32
 }
 
@@ -197,7 +230,8 @@ mod tests {
     fn probe_lists_contain_no_shell_metacharacters() {
         for item in PROBED_BINARIES.iter().chain(PROBED_PATHS.iter()) {
             assert!(
-                item.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c)),
+                item.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c)),
                 "{item:?} would need quoting inside the sh -c probe"
             );
         }
@@ -208,7 +242,9 @@ mod tests {
     #[test]
     fn list_probes_normalise_their_exit_status() {
         for request in [binaries_request(), paths_request()] {
-            let Request::Exec { argv } = &request else { panic!("expected an exec request") };
+            let Request::Exec { argv } = &request else {
+                panic!("expected an exec request")
+            };
             let script = argv.last().expect("script argument");
             assert!(
                 script.trim_end().ends_with("exit 0"),
@@ -245,10 +281,16 @@ mod tests {
             ),
             (clock_ticks_request(), "100\n"),
             (page_size_request(), "4096\n"),
-            (stat_request(), "cpu  1 2 3\ncpu0 1 2 3\ncpu1 1 2 3\nintr 5\n"),
+            (
+                stat_request(),
+                "cpu  1 2 3\ncpu0 1 2 3\ncpu1 1 2 3\nintr 5\n",
+            ),
             (coreutils_request(), "ls (GNU coreutils) 9.1\n"),
             (binaries_request(), "docker\nsystemctl\nss\nip\n"),
-            (paths_request(), "/proc/stat\n/sys/fs/cgroup/cgroup.controllers\n"),
+            (
+                paths_request(),
+                "/proc/stat\n/sys/fs/cgroup/cgroup.controllers\n",
+            ),
         ]));
 
         assert_eq!(caps.kernel, "6.1.0-18-arm64");
@@ -257,7 +299,10 @@ mod tests {
         assert_eq!(caps.distro, "Debian GNU/Linux 12 (bookworm)");
         assert_eq!(caps.clock_ticks, 100);
         assert_eq!(caps.page_size, 4096);
-        assert_eq!(caps.cpu_count, 2, "aggregate 'cpu' line must not be counted as a core");
+        assert_eq!(
+            caps.cpu_count, 2,
+            "aggregate 'cpu' line must not be counted as a core"
+        );
         assert_eq!(caps.coreutils, Coreutils::Gnu);
         assert_eq!(caps.cgroup, CgroupVersion::V2);
         assert!(caps.has("docker") && caps.has("ss"));
@@ -295,14 +340,23 @@ mod tests {
     #[test]
     fn os_release_without_pretty_name_is_tolerated() {
         assert_eq!(parse_pretty_name("ID=alpine\nVERSION_ID=3.19\n"), None);
-        assert_eq!(parse_pretty_name("PRETTY_NAME=\"Alpine Linux v3.19\"\n").as_deref(), Some("Alpine Linux v3.19"));
+        assert_eq!(
+            parse_pretty_name("PRETTY_NAME=\"Alpine Linux v3.19\"\n").as_deref(),
+            Some("Alpine Linux v3.19")
+        );
         // Unquoted form is legal in os-release.
-        assert_eq!(parse_pretty_name("PRETTY_NAME=Gentoo\n").as_deref(), Some("Gentoo"));
+        assert_eq!(
+            parse_pretty_name("PRETTY_NAME=Gentoo\n").as_deref(),
+            Some("Gentoo")
+        );
     }
 
     #[test]
     fn counts_double_digit_cpu_ids() {
-        let stat = (0..12).map(|i| format!("cpu{i} 1 2 3")).collect::<Vec<_>>().join("\n");
+        let stat = (0..12)
+            .map(|i| format!("cpu{i} 1 2 3"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert_eq!(count_cpus(&format!("cpu  0 0 0\n{stat}\n")), 12);
     }
 }

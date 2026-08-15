@@ -15,7 +15,11 @@ pub struct Sample {
 
 impl Sample {
     pub fn new(series: SeriesId, at_ms: i64, value: impl Into<Value>) -> Self {
-        Sample { series, at_ms, value: value.into() }
+        Sample {
+            series,
+            at_ms,
+            value: value.into(),
+        }
     }
 }
 
@@ -37,7 +41,10 @@ impl SampleSink {
     /// [`SampleSink::push`] shares this timestamp, so a whole tick lines up on the time axis
     /// even though its readings were parsed sequentially.
     pub fn new(at_ms: i64) -> Self {
-        SampleSink { at_ms, ..Default::default() }
+        SampleSink {
+            at_ms,
+            ..Default::default()
+        }
     }
 
     /// The tick timestamp, for sources that need to emit off-cycle samples.
@@ -57,14 +64,16 @@ impl SampleSink {
 
     /// Record a reading against an already-described series.
     pub fn push(&mut self, series: &SeriesId, value: impl Into<Value>) -> &mut Self {
-        self.samples.push(Sample::new(series.clone(), self.at_ms, value));
+        self.samples
+            .push(Sample::new(series.clone(), self.at_ms, value));
         self
     }
 
     /// Describe a series and record its first reading in one call — the common case, since most
     /// sources re-describe their series every tick.
     pub fn emit(&mut self, descriptor: SeriesDescriptor, value: impl Into<Value>) -> &mut Self {
-        self.samples.push(Sample::new(descriptor.id.clone(), self.at_ms, value));
+        self.samples
+            .push(Sample::new(descriptor.id.clone(), self.at_ms, value));
         self.descriptors.push(descriptor);
         self
     }

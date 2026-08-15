@@ -20,13 +20,18 @@ fn corpus_root() -> PathBuf {
 
 /// Map a remote path to its captured filename: `/proc/net/dev` -> `net-dev`.
 fn corpus_name(path: &str) -> String {
-    path.trim_start_matches("/proc/").trim_start_matches('/').replace('/', "-")
+    path.trim_start_matches("/proc/")
+        .trim_start_matches('/')
+        .replace('/', "-")
 }
 
 fn read(host: &str, name: &str) -> String {
     let path = corpus_root().join(host).join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!("missing corpus {}: {e}\nrun fixtures/capture.sh to regenerate", path.display())
+        panic!(
+            "missing corpus {}: {e}\nrun fixtures/capture.sh to regenerate",
+            path.display()
+        )
     })
 }
 
@@ -46,15 +51,20 @@ pub fn corpus(host: &str) -> CorpusBuilder {
         responses: Responses::default(),
         paths: BTreeSet::new(),
         binaries: BTreeSet::new(),
-        coreutils: if host == "alpine" { Coreutils::Busybox } else { Coreutils::Gnu },
-        }
+        coreutils: if host == "alpine" {
+            Coreutils::Busybox
+        } else {
+            Coreutils::Gnu
+        },
+    }
 }
 
 impl CorpusBuilder {
     /// Serve a captured file for `path`.
     pub fn file(mut self, path: &str) -> Self {
         let body = read(&self.host, &corpus_name(path));
-        self.responses.insert(Request::read(path).id(), Response::ok(body));
+        self.responses
+            .insert(Request::read(path).id(), Response::ok(body));
         self.paths.insert(path.to_string());
         self
     }
@@ -62,7 +72,8 @@ impl CorpusBuilder {
     /// Serve captured output for a command.
     pub fn exec(mut self, argv: &[&str], corpus_file: &str) -> Self {
         let body = read(&self.host, corpus_file);
-        self.responses.insert(Request::exec(argv.iter().copied()).id(), Response::ok(body));
+        self.responses
+            .insert(Request::exec(argv.iter().copied()).id(), Response::ok(body));
         if let Some(program) = argv.first() {
             self.binaries.insert((*program).to_string());
         }
@@ -71,13 +82,15 @@ impl CorpusBuilder {
 
     /// Serve a non-zero exit for `path`, as a host lacking that file would.
     pub fn missing(mut self, path: &str) -> Self {
-        self.responses.insert(Request::read(path).id(), Response::failed(1));
+        self.responses
+            .insert(Request::read(path).id(), Response::failed(1));
         self
     }
 
     /// Serve literal text for `path`, for edge cases no real host produces on demand.
     pub fn literal(mut self, path: &str, body: &str) -> Self {
-        self.responses.insert(Request::read(path).id(), Response::ok(body));
+        self.responses
+            .insert(Request::read(path).id(), Response::ok(body));
         self.paths.insert(path.to_string());
         self
     }
@@ -117,14 +130,20 @@ impl CorpusBuilder {
 /// Run a source's parser and return what it produced.
 pub fn sink_for(source: &dyn Source, ctx: &TargetCtx, responses: &Responses) -> SampleSink {
     let mut out = SampleSink::new(1_700_000_000_000);
-    source.parse(ctx, responses, &mut out).expect("parser should not error on captured output");
+    source
+        .parse(ctx, responses, &mut out)
+        .expect("parser should not error on captured output");
     out
 }
 
 /// The numeric value of one sample, looked up by metric name.
 pub fn value_of(out: &SampleSink, metric: &str) -> Option<f64> {
     let descriptor = out.descriptors.iter().find(|d| d.metric == metric)?;
-    out.samples.iter().find(|s| s.series == descriptor.id)?.value.as_f64()
+    out.samples
+        .iter()
+        .find(|s| s.series == descriptor.id)?
+        .value
+        .as_f64()
 }
 
 /// Every metric name the source emitted, sorted.

@@ -95,7 +95,10 @@ impl TargetRuntime {
 
     /// Round trips this runtime has spent since connecting.
     pub fn round_trips(&self) -> u64 {
-        self.session.as_ref().map(SshSession::round_trips).unwrap_or(0)
+        self.session
+            .as_ref()
+            .map(SshSession::round_trips)
+            .unwrap_or(0)
     }
 
     /// Connect, detect capabilities, and build the collection context.
@@ -172,7 +175,11 @@ impl TargetRuntime {
 
         let tick = self.collector.collect(ctx, &responses, now_ms());
 
-        self.store.ingest(tick.entities.clone(), tick.descriptors.clone(), &tick.samples);
+        self.store.ingest(
+            tick.entities.clone(),
+            tick.descriptors.clone(),
+            &tick.samples,
+        );
         // Prune anything that stopped being reported — a stopped container must leave the
         // dashboard rather than sitting there with its last reading frozen.
         let mut present = tick.entity_ids();
@@ -189,7 +196,10 @@ impl TargetRuntime {
 
     /// The merged request set a refresh would issue right now, for diagnostics.
     pub fn planned_requests(&self) -> Vec<Request> {
-        self.ctx.as_ref().map(|ctx| self.collector.requests(ctx)).unwrap_or_default()
+        self.ctx
+            .as_ref()
+            .map(|ctx| self.collector.requests(ctx))
+            .unwrap_or_default()
     }
 
     fn on_disconnect(&mut self, error: &TransportError) {
@@ -203,8 +213,10 @@ impl TargetRuntime {
                 retry_in_ms: backoff_for(self.attempt).as_millis() as u64,
             };
         } else {
-            self.state =
-                TargetState::Failed { message: error.to_string(), recoverable: false };
+            self.state = TargetState::Failed {
+                message: error.to_string(),
+                recoverable: false,
+            };
         }
     }
 

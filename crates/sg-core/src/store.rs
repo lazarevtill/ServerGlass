@@ -71,7 +71,10 @@ impl LiveStore {
             match sample.value.as_f64() {
                 Some(value) => {
                     let series = self.history.entry(sample.series.clone()).or_default();
-                    series.push_back(Point { at_ms: sample.at_ms, value });
+                    series.push_back(Point {
+                        at_ms: sample.at_ms,
+                        value,
+                    });
                     while series.len() > self.window {
                         series.pop_front();
                     }
@@ -113,12 +116,18 @@ impl LiveStore {
     pub fn history(&self, series: &SeriesId) -> &[Point] {
         // `VecDeque` is contiguous here only by luck, so hand back the front slice and let callers
         // that need the whole window use `history_vec`.
-        self.history.get(series).map(|h| h.as_slices().0).unwrap_or(&[])
+        self.history
+            .get(series)
+            .map(|h| h.as_slices().0)
+            .unwrap_or(&[])
     }
 
     /// The full window in order, oldest first.
     pub fn history_vec(&self, series: &SeriesId) -> Vec<Point> {
-        self.history.get(series).map(|h| h.iter().copied().collect()).unwrap_or_default()
+        self.history
+            .get(series)
+            .map(|h| h.iter().copied().collect())
+            .unwrap_or_default()
     }
 
     pub fn text(&self, series: &SeriesId) -> Option<&str> {
@@ -143,8 +152,11 @@ impl LiveStore {
 
     /// Series belonging to one entity, sorted by metric name for stable UI ordering.
     pub fn series_for(&self, entity: &EntityId) -> Vec<&SeriesDescriptor> {
-        let mut found: Vec<_> =
-            self.descriptors.values().filter(|d| &d.entity == entity).collect();
+        let mut found: Vec<_> = self
+            .descriptors
+            .values()
+            .filter(|d| &d.entity == entity)
+            .collect();
         found.sort_by(|a, b| a.metric.cmp(&b.metric));
         found
     }
@@ -184,7 +196,13 @@ mod tests {
     use sg_model::{EntityKind, SourceId, Unit, Value};
 
     fn descriptor(entity: &EntityId, metric: &str) -> SeriesDescriptor {
-        SeriesDescriptor::gauge(&SourceId::new("test"), entity, metric, metric, Unit::Percent)
+        SeriesDescriptor::gauge(
+            &SourceId::new("test"),
+            entity,
+            metric,
+            metric,
+            Unit::Percent,
+        )
     }
 
     fn host() -> Entity {
@@ -274,7 +292,10 @@ mod tests {
         store.retain_entities(&[host.id.clone(), stays.id.clone()]);
 
         assert!(store.entity(&gone.id).is_none());
-        assert!(store.latest(&d_gone.id).is_none(), "series of a removed entity survived");
+        assert!(
+            store.latest(&d_gone.id).is_none(),
+            "series of a removed entity survived"
+        );
         assert!(store.descriptor(&d_gone.id).is_none());
         assert_eq!(store.latest(&d_stays.id).map(|p| p.value), Some(2.0));
     }
@@ -292,21 +313,33 @@ mod tests {
         all.extend(children.clone());
         store.ingest(all, vec![], &[]);
 
-        let names: Vec<_> =
-            store.children_of(&host.id).iter().map(|e| e.display.clone()).collect();
-        assert_eq!(names, vec!["eth0", "eth1", "lo"], "children must be ordered deterministically");
+        let names: Vec<_> = store
+            .children_of(&host.id)
+            .iter()
+            .map(|e| e.display.clone())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["eth0", "eth1", "lo"],
+            "children must be ordered deterministically"
+        );
     }
 
     #[test]
     fn series_for_an_entity_are_sorted_by_metric() {
         let mut store = LiveStore::default();
         let host = host();
-        let descriptors: Vec<_> =
-            ["tx_bytes", "rx_bytes", "errors"].iter().map(|m| descriptor(&host.id, m)).collect();
+        let descriptors: Vec<_> = ["tx_bytes", "rx_bytes", "errors"]
+            .iter()
+            .map(|m| descriptor(&host.id, m))
+            .collect();
         store.ingest(vec![host.clone()], descriptors, &[]);
 
-        let metrics: Vec<_> =
-            store.series_for(&host.id).iter().map(|d| d.metric.clone()).collect();
+        let metrics: Vec<_> = store
+            .series_for(&host.id)
+            .iter()
+            .map(|d| d.metric.clone())
+            .collect();
         assert_eq!(metrics, vec!["errors", "rx_bytes", "tx_bytes"]);
     }
 

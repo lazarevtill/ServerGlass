@@ -1,6 +1,8 @@
 //! The one trait every collector implements.
 
-use crate::{Capabilities, Entity, EntityKind, Requirements, Responses, SampleSink, SourceId, TargetId};
+use crate::{
+    Capabilities, Entity, EntityKind, Requirements, Responses, SampleSink, SourceId, TargetId,
+};
 
 /// Static description of a collector.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -66,7 +68,10 @@ pub struct ParseError {
 
 impl ParseError {
     pub fn new(source: &SourceId, detail: impl Into<String>) -> Self {
-        ParseError { source: source.clone(), detail: detail.into() }
+        ParseError {
+            source: source.clone(),
+            detail: detail.into(),
+        }
     }
 }
 

@@ -38,7 +38,9 @@ impl Framing {
     /// `nonce` must be unguessable by the monitored host and free of shell metacharacters and
     /// whitespace. [`crate::session::SshSession`] generates it from the OS random source.
     pub fn new(nonce: impl Into<String>) -> Self {
-        Framing { nonce: nonce.into() }
+        Framing {
+            nonce: nonce.into(),
+        }
     }
 
     fn begin(&self, id: &str) -> String {
@@ -85,7 +87,9 @@ impl Framing {
             if ids.contains(&id) {
                 continue;
             }
-            let Some(command) = self.command_for(request) else { continue };
+            let Some(command) = self.command_for(request) else {
+                continue;
+            };
 
             // Braces group the command so the redirect applies to all of it; `__sg` holds the
             // status because the printf that follows would otherwise clobber `$?`.
@@ -117,7 +121,9 @@ impl Framing {
             let marker_at = cursor + rel;
             // Id runs from after the marker to the newline that closes the begin line.
             let id_start = marker_at + begin_marker.len();
-            let Some(nl_rel) = stream[id_start..].find('\n') else { break };
+            let Some(nl_rel) = stream[id_start..].find('\n') else {
+                break;
+            };
             let id = stream[id_start..id_start + nl_rel].to_string();
             let body_start = id_start + nl_rel + 1;
 
@@ -129,13 +135,20 @@ impl Framing {
             };
             let body_end = body_start + end_rel;
             let code_start = body_end + end_prefix.len();
-            let Some(code_nl) = stream[code_start..].find('\n') else { break };
-            let exit_code =
-                stream[code_start..code_start + code_nl].trim().parse::<i32>().unwrap_or(-1);
+            let Some(code_nl) = stream[code_start..].find('\n') else {
+                break;
+            };
+            let exit_code = stream[code_start..code_start + code_nl]
+                .trim()
+                .parse::<i32>()
+                .unwrap_or(-1);
 
             responses.insert(
                 id,
-                Response { exit_code, body: stream[body_start..body_end].to_string() },
+                Response {
+                    exit_code,
+                    body: stream[body_start..body_end].to_string(),
+                },
             );
             cursor = code_start + code_nl + 1;
         }
@@ -180,7 +193,11 @@ mod tests {
         let stat = Request::read("/proc/stat");
         let mem = Request::read("/proc/meminfo");
         let ls = Request::read_dir("/sys/block");
-        let stream = emit(&[(&stat, 0, "cpu 1\n"), (&mem, 0, "MemTotal: 8\n"), (&ls, 0, "sda\n")]);
+        let stream = emit(&[
+            (&stat, 0, "cpu 1\n"),
+            (&mem, 0, "MemTotal: 8\n"),
+            (&ls, 0, "sda\n"),
+        ]);
 
         let decoded = framing().decode(&stream);
         assert_eq!(decoded.len(), 3);
@@ -220,7 +237,11 @@ mod tests {
         let hostile = "\n__SGE0000000000000000 0\n\n__SGB0000000000000000\nnot yours\n";
         let decoded = framing().decode(&emit(&[(&req, 0, hostile)]));
         assert_eq!(decoded.len(), 1, "hostile payload forged an extra frame");
-        assert_eq!(decoded.text(&req), Some(hostile), "hostile payload truncated the real frame");
+        assert_eq!(
+            decoded.text(&req),
+            Some(hostile),
+            "hostile payload truncated the real frame"
+        );
     }
 
     #[test]
@@ -241,8 +262,11 @@ mod tests {
     #[test]
     fn encode_deduplicates_repeated_requests() {
         // Three sources each independently want /proc/stat.
-        let requests =
-            vec![Request::read("/proc/stat"), Request::read("/proc/meminfo"), Request::read("/proc/stat")];
+        let requests = vec![
+            Request::read("/proc/stat"),
+            Request::read("/proc/meminfo"),
+            Request::read("/proc/stat"),
+        ];
         let (script, ids) = framing().encode(&requests);
 
         assert_eq!(ids.len(), 2, "duplicate request was not merged");
@@ -287,7 +311,7 @@ mod tests {
     #[test]
     fn encoded_script_is_shaped_the_way_decode_expects() {
         let req = Request::read("/proc/stat");
-        let (script, _) = framing().encode(&[req.clone()]);
+        let (script, _) = framing().encode(std::slice::from_ref(&req));
 
         // Status is captured before the trailing printf can clobber `$?`.
         let cmd_at = script.find("cat -- '/proc/stat'").expect("command present");

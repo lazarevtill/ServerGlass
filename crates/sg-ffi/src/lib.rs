@@ -21,11 +21,11 @@ use std::sync::{Arc, Mutex, RwLock};
 use sg_core::{default_sources, TargetRuntime, TargetState};
 use sg_model::{now_ms, TargetId};
 
+use view::{connection_spec, entity_view, host_details, host_gauges};
 pub use view::{
     format_uptime, format_value, ConnectionState, DetailGroup, EntityView, MetricGauge,
     TargetConfig, TargetSnapshot,
 };
-use view::{connection_spec, entity_view, host_details, host_gauges};
 
 uniffi::setup_scaffolding!();
 
@@ -91,7 +91,11 @@ impl ServerGlass {
 
         self.targets.write().expect("targets lock").insert(
             id.clone(),
-            Arc::new(Target { config, snapshot, task: Mutex::new(None) }),
+            Arc::new(Target {
+                config,
+                snapshot,
+                task: Mutex::new(None),
+            }),
         );
         id
     }
@@ -105,7 +109,9 @@ impl ServerGlass {
             return Ok(());
         }
 
-        let handle = self.runtime.spawn(poll_loop(target_id, Arc::clone(&target)));
+        let handle = self
+            .runtime
+            .spawn(poll_loop(target_id, Arc::clone(&target)));
         *slot = Some(handle);
         Ok(())
     }
@@ -123,7 +129,10 @@ impl ServerGlass {
 
     pub fn remove_target(&self, target_id: String) -> Result<(), SgError> {
         self.stop(target_id.clone())?;
-        self.targets.write().expect("targets lock").remove(&target_id);
+        self.targets
+            .write()
+            .expect("targets lock")
+            .remove(&target_id);
         Ok(())
     }
 
@@ -135,8 +144,13 @@ impl ServerGlass {
     }
 
     pub fn target_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> =
-            self.targets.read().expect("targets lock").keys().cloned().collect();
+        let mut ids: Vec<String> = self
+            .targets
+            .read()
+            .expect("targets lock")
+            .keys()
+            .cloned()
+            .collect();
         ids.sort();
         ids
     }
@@ -182,7 +196,10 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
 
         if let Err(error) = runtime.connect().await {
             let recoverable = error.is_transient();
-            publish(ConnectionState::Failed { message: error.to_string(), recoverable });
+            publish(ConnectionState::Failed {
+                message: error.to_string(),
+                recoverable,
+            });
             if !recoverable {
                 // Bad credentials or a changed host key: retrying cannot fix it, and hammering
                 // the host is how accounts get locked out.
@@ -225,7 +242,10 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
             tokio::time::sleep(interval.saturating_sub(elapsed)).await;
         }
 
-        if let TargetState::Failed { recoverable: false, .. } = runtime.state() {
+        if let TargetState::Failed {
+            recoverable: false, ..
+        } = runtime.state()
+        {
             return;
         }
         tokio::time::sleep(sg_core::backoff_for(1)).await;
@@ -245,7 +265,11 @@ fn build_snapshot(
         Some(host) => (
             host_gauges(store, &host.id),
             host_details(store, &host.id),
-            store.children_of(&host.id).into_iter().map(|e| entity_view(e, store)).collect(),
+            store
+                .children_of(&host.id)
+                .into_iter()
+                .map(|e| entity_view(e, store))
+                .collect(),
         ),
         None => (Vec::new(), Vec::new(), Vec::new()),
     };
@@ -307,8 +331,14 @@ mod tests {
             core.snapshot("nope".into()),
             Err(SgError::UnknownTarget { .. })
         ));
-        assert!(matches!(core.start("nope".into()), Err(SgError::UnknownTarget { .. })));
-        assert!(matches!(core.stop("nope".into()), Err(SgError::UnknownTarget { .. })));
+        assert!(matches!(
+            core.start("nope".into()),
+            Err(SgError::UnknownTarget { .. })
+        ));
+        assert!(matches!(
+            core.stop("nope".into()),
+            Err(SgError::UnknownTarget { .. })
+        ));
     }
 
     #[test]
@@ -318,7 +348,10 @@ mod tests {
 
         core.remove_target(id.clone()).unwrap();
         assert!(core.target_ids().is_empty());
-        assert!(matches!(core.snapshot(id), Err(SgError::UnknownTarget { .. })));
+        assert!(matches!(
+            core.snapshot(id),
+            Err(SgError::UnknownTarget { .. })
+        ));
     }
 
     #[test]

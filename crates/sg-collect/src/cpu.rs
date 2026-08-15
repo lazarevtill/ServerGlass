@@ -1,8 +1,8 @@
 //! CPU utilisation from `/proc/stat`.
 
 use sg_model::{
-    Entity, EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor,
-    Source, SourceDescriptor, SourceId, TargetCtx, Unit,
+    Entity, EntityKind, ParseResult, Request, Requirements, Responses, SampleSink,
+    SeriesDescriptor, Source, SourceDescriptor, SourceId, TargetCtx, Unit,
 };
 
 /// One `cpu`/`cpuN` row of `/proc/stat`, in clock ticks.
@@ -36,7 +36,9 @@ impl CpuTimes {
     /// Kernels have gained fields over time (`steal` in 2.6.11, `guest` in 2.6.24) and BusyBox
     /// hosts may report fewer, so missing trailing fields default to zero rather than failing.
     fn parse(fields: &str) -> CpuTimes {
-        let mut n = fields.split_whitespace().filter_map(|f| f.parse::<u64>().ok());
+        let mut n = fields
+            .split_whitespace()
+            .filter_map(|f| f.parse::<u64>().ok());
         CpuTimes {
             user: n.next().unwrap_or(0),
             nice: n.next().unwrap_or(0),
@@ -71,7 +73,9 @@ pub fn parse_proc_stat(text: &str) -> ProcStat {
     let mut out = ProcStat::default();
 
     for line in text.lines() {
-        let Some((key, rest)) = line.split_once(char::is_whitespace) else { continue };
+        let Some((key, rest)) = line.split_once(char::is_whitespace) else {
+            continue;
+        };
         match key {
             "cpu" => out.total = CpuTimes::parse(rest),
             "ctxt" => out.context_switches = rest.trim().parse().ok(),
@@ -124,7 +128,9 @@ impl Source for CpuSource {
     }
 
     fn parse(&self, ctx: &TargetCtx, responses: &Responses, out: &mut SampleSink) -> ParseResult {
-        let Some(text) = responses.text(&Self::request()) else { return Ok(()) };
+        let Some(text) = responses.text(&Self::request()) else {
+            return Ok(());
+        };
         let stat = parse_proc_stat(text);
         let id = &self.descriptor.id;
 
@@ -146,7 +152,11 @@ impl Source for CpuSource {
         // The breakdown uses the same scale, so the parts sum to the whole.
         for (metric, display, ticks) in [
             ("cpu_user", "User", stat.total.user + stat.total.nice),
-            ("cpu_system", "System", stat.total.system + stat.total.irq + stat.total.softirq),
+            (
+                "cpu_system",
+                "System",
+                stat.total.system + stat.total.irq + stat.total.softirq,
+            ),
             ("cpu_iowait", "I/O wait", stat.total.iowait),
             ("cpu_steal", "Steal", stat.total.steal),
         ] {
@@ -171,7 +181,13 @@ impl Source for CpuSource {
         }
         if let Some(switches) = stat.context_switches {
             out.emit(
-                SeriesDescriptor::counter(id, host, "ctx_switches", "Context switches", Unit::Count),
+                SeriesDescriptor::counter(
+                    id,
+                    host,
+                    "ctx_switches",
+                    "Context switches",
+                    Unit::Count,
+                ),
                 switches,
             );
         }
@@ -231,7 +247,10 @@ mod tests {
             "cpu  9 9 9 9\ncpu0 1 0 0 10\ncpu1 2 0 0 20\ncpu2 3 0 0 30\nctxt 42\nprocs_running 3\n",
         );
         assert_eq!(stat.cores.len(), 3);
-        assert_eq!(stat.cores.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 1, 2]);
+        assert_eq!(
+            stat.cores.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
         assert_eq!(stat.cores[1].1.user, 2);
         assert_eq!(stat.context_switches, Some(42));
         assert_eq!(stat.procs_running, Some(3));
@@ -268,8 +287,11 @@ mod tests {
                 one_core_rate * aggregate.scale
             );
 
-            let per_core =
-                out.descriptors.iter().find(|d| d.metric == "usage").expect("per-core series");
+            let per_core = out
+                .descriptors
+                .iter()
+                .find(|d| d.metric == "usage")
+                .expect("per-core series");
             assert!((one_core_rate * per_core.scale - 100.0).abs() < 1e-9);
 
             // Percent must survive differentiation as percent, not become percent-per-second.
@@ -284,13 +306,19 @@ mod tests {
 
         assert_eq!(out.entities.len(), ctx.caps.cpu_count as usize);
         assert!(out.entities.iter().all(|e| e.kind == EntityKind::CpuCore));
-        assert!(out.entities.iter().all(|e| e.parent.as_ref() == Some(&ctx.host.id)));
+        assert!(out
+            .entities
+            .iter()
+            .all(|e| e.parent.as_ref() == Some(&ctx.host.id)));
     }
 
     #[test]
     fn produces_nothing_when_the_host_did_not_answer() {
         let (ctx, _) = corpus("debian").build();
         let out = sink_for(&CpuSource::default(), &ctx, &Responses::default());
-        assert!(out.is_empty(), "a missing response should yield no samples, not zeroes");
+        assert!(
+            out.is_empty(),
+            "a missing response should yield no samples, not zeroes"
+        );
     }
 }

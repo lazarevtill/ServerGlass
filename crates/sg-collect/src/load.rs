@@ -1,8 +1,8 @@
 //! Load average and uptime.
 
 use sg_model::{
-    EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor, Source,
-    SourceDescriptor, SourceId, TargetCtx, Unit,
+    EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor,
+    Source, SourceDescriptor, SourceId, TargetCtx, Unit,
 };
 
 /// `/proc/loadavg`: `0.15 0.09 0.03 2/431 12345`.
@@ -25,7 +25,9 @@ pub fn parse_loadavg(text: &str) -> Option<LoadAvg> {
     };
 
     // The `runnable/total` field is absent on some minimal kernels; the averages are the point.
-    let Some(procs) = fields.next().and_then(|f| f.split_once('/')) else { return Some(load) };
+    let Some(procs) = fields.next().and_then(|f| f.split_once('/')) else {
+        return Some(load);
+    };
     Some(LoadAvg {
         runnable: procs.0.parse().unwrap_or(0),
         total_procs: procs.1.parse().unwrap_or(0),
@@ -153,8 +155,10 @@ mod tests {
     #[test]
     fn reads_both_corpora() {
         for host in HOSTS {
-            let (ctx, responses) =
-                corpus(host).file("/proc/loadavg").file("/proc/uptime").build();
+            let (ctx, responses) = corpus(host)
+                .file("/proc/loadavg")
+                .file("/proc/uptime")
+                .build();
             let out = sink_for(&LoadSource::default(), &ctx, &responses);
 
             assert!(value_of(&out, "load1").is_some(), "{host}: no load1");
@@ -171,15 +175,21 @@ mod tests {
             .build();
         let out = sink_for(&LoadSource::default(), &ctx, &responses);
 
-        let load1 = out.descriptors.iter().find(|d| d.metric == "load1").unwrap();
+        let load1 = out
+            .descriptors
+            .iter()
+            .find(|d| d.metric == "load1")
+            .unwrap();
         assert_eq!(load1.max, Some(ctx.caps.cpu_count as f64));
         assert!(ctx.caps.cpu_count > 0, "corpus should have reported cores");
     }
 
     #[test]
     fn one_missing_file_does_not_suppress_the_other() {
-        let (ctx, responses) =
-            corpus("debian").file("/proc/uptime").missing("/proc/loadavg").build();
+        let (ctx, responses) = corpus("debian")
+            .file("/proc/uptime")
+            .missing("/proc/loadavg")
+            .build();
         let out = sink_for(&LoadSource::default(), &ctx, &responses);
 
         assert!(value_of(&out, "uptime").is_some());

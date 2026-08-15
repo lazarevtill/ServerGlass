@@ -42,8 +42,9 @@ impl client::Handler for ClientHandler {
         &mut self,
         server_public_key: &russh::keys::ssh_key::PublicKey,
     ) -> std::result::Result<bool, Self::Error> {
-        let fingerprint =
-            server_public_key.fingerprint(russh::keys::HashAlg::Sha256).to_string();
+        let fingerprint = server_public_key
+            .fingerprint(russh::keys::HashAlg::Sha256)
+            .to_string();
 
         if self.policy == HostKeyPolicy::AcceptAny {
             self.record(HostKeyVerdict::Accepted);
@@ -114,37 +115,37 @@ impl SshSession {
         });
 
         let connect = client::connect(config, (spec.host.as_str(), spec.port), handler);
-        let mut handle = match timeout(Duration::from_millis(spec.connect_timeout_ms), connect).await
-        {
-            Err(_) => {
-                return Err(TransportError::Timeout {
-                    what: "connect",
-                    ms: spec.connect_timeout_ms,
-                })
-            }
-            Ok(Ok(handle)) => handle,
-            Ok(Err(err)) => {
-                // A rejected host key surfaces here as a generic protocol failure; the verdict
-                // slot tells us what actually happened so the user gets an actionable message.
-                return Err(match verdict.lock().ok().and_then(|v| v.clone()) {
-                    Some(HostKeyVerdict::Unknown { fingerprint }) => {
-                        TransportError::UnknownHostKey {
-                            host: spec.host.clone(),
-                            port: spec.port,
-                            fingerprint,
+        let mut handle =
+            match timeout(Duration::from_millis(spec.connect_timeout_ms), connect).await {
+                Err(_) => {
+                    return Err(TransportError::Timeout {
+                        what: "connect",
+                        ms: spec.connect_timeout_ms,
+                    })
+                }
+                Ok(Ok(handle)) => handle,
+                Ok(Err(err)) => {
+                    // A rejected host key surfaces here as a generic protocol failure; the verdict
+                    // slot tells us what actually happened so the user gets an actionable message.
+                    return Err(match verdict.lock().ok().and_then(|v| v.clone()) {
+                        Some(HostKeyVerdict::Unknown { fingerprint }) => {
+                            TransportError::UnknownHostKey {
+                                host: spec.host.clone(),
+                                port: spec.port,
+                                fingerprint,
+                            }
                         }
-                    }
-                    Some(HostKeyVerdict::Changed { fingerprint }) => {
-                        TransportError::HostKeyMismatch {
-                            host: spec.host.clone(),
-                            port: spec.port,
-                            fingerprint,
+                        Some(HostKeyVerdict::Changed { fingerprint }) => {
+                            TransportError::HostKeyMismatch {
+                                host: spec.host.clone(),
+                                port: spec.port,
+                                fingerprint,
+                            }
                         }
-                    }
-                    _ => TransportError::Ssh(err),
-                });
-            }
-        };
+                        _ => TransportError::Ssh(err),
+                    });
+                }
+            };
 
         authenticate(&mut handle, &spec).await?;
 
@@ -226,7 +227,10 @@ impl SshSession {
     }
 
     async fn raw_write(&mut self, text: &str) -> Result<()> {
-        self.channel.data_bytes(text.as_bytes().to_vec()).await.map_err(TransportError::Ssh)
+        self.channel
+            .data_bytes(text.as_bytes().to_vec())
+            .await
+            .map_err(TransportError::Ssh)
     }
 
     pub fn spec(&self) -> &ConnectionSpec {
@@ -248,14 +252,18 @@ impl SshSession {
     /// Close the channel and disconnect cleanly.
     pub async fn close(self) -> Result<()> {
         let _ = self.channel.eof().await;
-        self.handle.disconnect(Disconnect::ByApplication, "", "en").await?;
+        self.handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await?;
         Ok(())
     }
 }
 
 async fn authenticate(handle: &mut Handle<ClientHandler>, spec: &ConnectionSpec) -> Result<()> {
-    let auth_failed =
-        || TransportError::AuthFailed { user: spec.user.clone(), host: spec.host.clone() };
+    let auth_failed = || TransportError::AuthFailed {
+        user: spec.user.clone(),
+        host: spec.host.clone(),
+    };
 
     match &spec.auth {
         Auth::Password(password) => {
@@ -267,7 +275,10 @@ async fn authenticate(handle: &mut Handle<ClientHandler>, spec: &ConnectionSpec)
 
         Auth::KeyFile { path, passphrase } => {
             let key = load_secret_key(path, passphrase.as_deref()).map_err(|e| {
-                TransportError::KeyFile { path: path.clone(), detail: e.to_string() }
+                TransportError::KeyFile {
+                    path: path.clone(),
+                    detail: e.to_string(),
+                }
             })?;
             let hash_alg = handle.best_supported_rsa_hash().await?.flatten();
             let result = handle
@@ -354,7 +365,10 @@ mod tests {
     fn nonces_differ_between_connections() {
         let a = generate_nonce();
         let b = generate_nonce();
-        assert_ne!(a, b, "nonce is not random; a hostile payload could forge frame boundaries");
+        assert_ne!(
+            a, b,
+            "nonce is not random; a hostile payload could forge frame boundaries"
+        );
         assert!(a.len() >= 32);
         // Must survive shell quoting and line-oriented framing untouched.
         assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));

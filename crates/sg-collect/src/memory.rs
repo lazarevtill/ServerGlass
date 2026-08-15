@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use sg_model::{
-    EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor, Source,
-    SourceDescriptor, SourceId, TargetCtx, Unit,
+    EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor,
+    Source, SourceDescriptor, SourceId, TargetCtx, Unit,
 };
 
 /// Parse `/proc/meminfo` into bytes, keyed by field name without the colon.
@@ -15,9 +15,13 @@ use sg_model::{
 pub fn parse_meminfo(text: &str) -> HashMap<String, u64> {
     let mut out = HashMap::new();
     for line in text.lines() {
-        let Some((key, rest)) = line.split_once(':') else { continue };
+        let Some((key, rest)) = line.split_once(':') else {
+            continue;
+        };
         let mut parts = rest.split_whitespace();
-        let Some(value) = parts.next().and_then(|v| v.parse::<u64>().ok()) else { continue };
+        let Some(value) = parts.next().and_then(|v| v.parse::<u64>().ok()) else {
+            continue;
+        };
         let bytes = match parts.next() {
             Some("kB") | Some("KB") => value.saturating_mul(1024),
             _ => value,
@@ -62,12 +66,16 @@ impl Source for MemorySource {
     }
 
     fn parse(&self, ctx: &TargetCtx, responses: &Responses, out: &mut SampleSink) -> ParseResult {
-        let Some(text) = responses.text(&Self::request()) else { return Ok(()) };
+        let Some(text) = responses.text(&Self::request()) else {
+            return Ok(());
+        };
         let mem = parse_meminfo(text);
         let id = &self.descriptor.id;
         let host = &ctx.host.id;
 
-        let Some(&total) = mem.get("MemTotal") else { return Ok(()) };
+        let Some(&total) = mem.get("MemTotal") else {
+            return Ok(());
+        };
         if total == 0 {
             return Ok(());
         }
@@ -89,10 +97,14 @@ impl Source for MemorySource {
             used as f64 / total as f64 * 100.0,
         );
         out.emit(
-            SeriesDescriptor::gauge(id, host, "mem_used", "Used", Unit::Bytes).with_max(total as f64),
+            SeriesDescriptor::gauge(id, host, "mem_used", "Used", Unit::Bytes)
+                .with_max(total as f64),
             used,
         );
-        out.emit(SeriesDescriptor::gauge(id, host, "mem_total", "Total", Unit::Bytes), total);
+        out.emit(
+            SeriesDescriptor::gauge(id, host, "mem_total", "Total", Unit::Bytes),
+            total,
+        );
         out.emit(
             SeriesDescriptor::gauge(id, host, "mem_available", "Available", Unit::Bytes),
             available,
@@ -104,7 +116,10 @@ impl Source for MemorySource {
             ("Buffers", "mem_buffers", "Buffers"),
         ] {
             if let Some(&value) = mem.get(field) {
-                out.emit(SeriesDescriptor::gauge(id, host, metric, display, Unit::Bytes), value);
+                out.emit(
+                    SeriesDescriptor::gauge(id, host, metric, display, Unit::Bytes),
+                    value,
+                );
             }
         }
 
@@ -157,9 +172,18 @@ mod tests {
             let usage = value_of(&out, "mem_usage").expect("mem_usage");
 
             assert!(total > 0.0, "{host}: no total memory");
-            assert!((used + available - total).abs() < 1.0, "{host}: used + available != total");
-            assert!((0.0..=100.0).contains(&usage), "{host}: usage {usage} out of range");
-            assert!((usage - used / total * 100.0).abs() < 1e-6, "{host}: percentage disagrees");
+            assert!(
+                (used + available - total).abs() < 1.0,
+                "{host}: used + available != total"
+            );
+            assert!(
+                (0.0..=100.0).contains(&usage),
+                "{host}: usage {usage} out of range"
+            );
+            assert!(
+                (usage - used / total * 100.0).abs() < 1e-6,
+                "{host}: percentage disagrees"
+            );
         }
     }
 
@@ -184,7 +208,10 @@ mod tests {
     #[test]
     fn falls_back_when_mem_available_is_absent() {
         let (ctx, responses) = corpus("debian")
-            .literal("/proc/meminfo", "MemTotal: 1000 kB\nMemFree: 100 kB\nBuffers: 50 kB\nCached: 150 kB\n")
+            .literal(
+                "/proc/meminfo",
+                "MemTotal: 1000 kB\nMemFree: 100 kB\nBuffers: 50 kB\nCached: 150 kB\n",
+            )
             .build();
         let out = sink_for(&MemorySource::default(), &ctx, &responses);
         assert_eq!(value_of(&out, "mem_used"), Some(700.0 * 1024.0));
@@ -193,7 +220,10 @@ mod tests {
     #[test]
     fn omits_swap_series_entirely_when_swap_is_disabled() {
         let (ctx, responses) = corpus("debian")
-            .literal("/proc/meminfo", "MemTotal: 1000 kB\nMemAvailable: 500 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n")
+            .literal(
+                "/proc/meminfo",
+                "MemTotal: 1000 kB\nMemAvailable: 500 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n",
+            )
             .build();
         let out = sink_for(&MemorySource::default(), &ctx, &responses);
 
@@ -204,7 +234,10 @@ mod tests {
     #[test]
     fn reports_swap_when_present() {
         let (ctx, responses) = corpus("debian")
-            .literal("/proc/meminfo", "MemTotal: 1000 kB\nMemAvailable: 500 kB\nSwapTotal: 400 kB\nSwapFree: 100 kB\n")
+            .literal(
+                "/proc/meminfo",
+                "MemTotal: 1000 kB\nMemAvailable: 500 kB\nSwapTotal: 400 kB\nSwapFree: 100 kB\n",
+            )
             .build();
         let out = sink_for(&MemorySource::default(), &ctx, &responses);
         assert_eq!(value_of(&out, "swap_used"), Some(300.0 * 1024.0));
@@ -213,8 +246,9 @@ mod tests {
 
     #[test]
     fn a_host_reporting_zero_total_produces_nothing_rather_than_dividing_by_zero() {
-        let (ctx, responses) =
-            corpus("debian").literal("/proc/meminfo", "MemTotal: 0 kB\n").build();
+        let (ctx, responses) = corpus("debian")
+            .literal("/proc/meminfo", "MemTotal: 0 kB\n")
+            .build();
         let out = sink_for(&MemorySource::default(), &ctx, &responses);
         assert!(out.is_empty());
     }

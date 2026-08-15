@@ -39,7 +39,10 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    argv.into_iter().map(|a| shell_quote(a.as_ref())).collect::<Vec<_>>().join(" ")
+    argv.into_iter()
+        .map(|a| shell_quote(a.as_ref()))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -69,7 +72,10 @@ mod tests {
             assert!(quoted.starts_with('\'') && quoted.ends_with('\''));
             // Nothing inside may terminate the quote except via the documented escape sequence.
             let inner = &quoted[1..quoted.len() - 1];
-            assert!(!inner.contains('\''), "{hostile:?} leaked a bare quote: {quoted}");
+            assert!(
+                !inner.contains('\''),
+                "{hostile:?} leaked a bare quote: {quoted}"
+            );
         }
     }
 
@@ -84,7 +90,13 @@ mod tests {
 
     #[test]
     fn joins_argv_with_each_element_quoted() {
-        assert_eq!(shell_join(["cat", "--", "/proc/stat"]), "'cat' '--' '/proc/stat'");
-        assert_eq!(shell_join(["docker", "inspect", "a b"]), "'docker' 'inspect' 'a b'");
+        assert_eq!(
+            shell_join(["cat", "--", "/proc/stat"]),
+            "'cat' '--' '/proc/stat'"
+        );
+        assert_eq!(
+            shell_join(["docker", "inspect", "a b"]),
+            "'docker' 'inspect' 'a b'"
+        );
     }
 }

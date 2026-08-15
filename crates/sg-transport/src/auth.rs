@@ -13,7 +13,10 @@ pub enum Auth {
     /// never sees key material at all.
     Agent,
     /// A private key file, optionally passphrase-protected.
-    KeyFile { path: PathBuf, passphrase: Option<String> },
+    KeyFile {
+        path: PathBuf,
+        passphrase: Option<String>,
+    },
     /// Password authentication, for hosts that allow nothing else.
     Password(String),
 }

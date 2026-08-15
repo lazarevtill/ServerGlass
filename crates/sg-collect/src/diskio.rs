@@ -1,8 +1,8 @@
 //! Block device throughput from `/proc/diskstats`.
 
 use sg_model::{
-    Entity, EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor,
-    Source, SourceDescriptor, SourceId, TargetCtx, Unit,
+    Entity, EntityKind, ParseResult, Request, Requirements, Responses, SampleSink,
+    SeriesDescriptor, Source, SourceDescriptor, SourceId, TargetCtx, Unit,
 };
 
 /// `/proc/diskstats` reports in 512-byte sectors regardless of the device's real sector size.
@@ -35,7 +35,9 @@ impl DiskStats {
     /// Virtual devices that exist on nearly every host and interest nobody: snap mounts, ramdisks,
     /// and the floppy driver that still enumerates on some kernels.
     pub fn is_virtual(&self) -> bool {
-        ["loop", "ram", "fd", "sr", "zram"].iter().any(|p| self.name.starts_with(p))
+        ["loop", "ram", "fd", "sr", "zram"]
+            .iter()
+            .any(|p| self.name.starts_with(p))
     }
 
     pub fn is_idle(&self) -> bool {
@@ -56,7 +58,12 @@ pub fn parse_diskstats(text: &str) -> Vec<DiskStats> {
         if fields.len() < 14 {
             continue;
         }
-        let n = |i: usize| fields.get(i).and_then(|f| f.parse::<u64>().ok()).unwrap_or(0);
+        let n = |i: usize| {
+            fields
+                .get(i)
+                .and_then(|f| f.parse::<u64>().ok())
+                .unwrap_or(0)
+        };
 
         out.push(DiskStats {
             name: fields[2].to_string(),
@@ -128,7 +135,9 @@ impl Source for DiskIoSource {
     }
 
     fn parse(&self, ctx: &TargetCtx, responses: &Responses, out: &mut SampleSink) -> ParseResult {
-        let Some(text) = responses.text(&Self::request()) else { return Ok(()) };
+        let Some(text) = responses.text(&Self::request()) else {
+            return Ok(());
+        };
         let all = parse_diskstats(text);
         let id = &self.descriptor.id;
 
@@ -159,7 +168,10 @@ impl Source for DiskIoSource {
                 ("reads", "Read ops", disk.reads, Unit::Operations),
                 ("writes", "Write ops", disk.writes, Unit::Operations),
             ] {
-                out.emit(SeriesDescriptor::counter(id, &entity.id, metric, display, unit), value);
+                out.emit(
+                    SeriesDescriptor::counter(id, &entity.id, metric, display, unit),
+                    value,
+                );
             }
             out.emit(
                 SeriesDescriptor::gauge(id, &entity.id, "in_flight", "In flight", Unit::Count),
@@ -248,8 +260,14 @@ mod tests {
         let out = sink_for(&DiskIoSource::default(), &ctx, &responses);
 
         let names: Vec<_> = out.entities.iter().map(|e| e.display.as_str()).collect();
-        assert!(!names.contains(&"loop0"), "loop devices are noise on every host");
-        assert!(!names.contains(&"sdb"), "a device with no I/O has nothing to show");
+        assert!(
+            !names.contains(&"loop0"),
+            "loop devices are noise on every host"
+        );
+        assert!(
+            !names.contains(&"sdb"),
+            "a device with no I/O has nothing to show"
+        );
         assert!(names.contains(&"nvme0n1"));
         assert!(names.contains(&"sda"));
     }
@@ -262,7 +280,10 @@ mod tests {
         let out = sink_for(&DiskIoSource::default(), &ctx, &responses);
 
         // nvme0n1 (2000 sectors) + sda (10 sectors), excluding nvme0n1p1's 800.
-        assert_eq!(value_of(&out, "disk_read"), Some((2000 + 10) as f64 * 512.0));
+        assert_eq!(
+            value_of(&out, "disk_read"),
+            Some((2000 + 10) as f64 * 512.0)
+        );
     }
 
     #[test]
@@ -270,8 +291,15 @@ mod tests {
         let (ctx, responses) = corpus("debian").literal("/proc/diskstats", SAMPLE).build();
         let out = sink_for(&DiskIoSource::default(), &ctx, &responses);
 
-        let part = out.entities.iter().find(|e| e.display == "nvme0n1p1").unwrap();
-        assert_eq!(part.labels.get("partition_of").map(String::as_str), Some("nvme0n1"));
+        let part = out
+            .entities
+            .iter()
+            .find(|e| e.display == "nvme0n1p1")
+            .unwrap();
+        assert_eq!(
+            part.labels.get("partition_of").map(String::as_str),
+            Some("nvme0n1")
+        );
     }
 
     #[test]
@@ -279,7 +307,10 @@ mod tests {
         for host in HOSTS {
             let (ctx, responses) = corpus(host).file("/proc/diskstats").build();
             let out = sink_for(&DiskIoSource::default(), &ctx, &responses);
-            assert!(value_of(&out, "disk_read").is_some(), "{host}: no host disk totals");
+            assert!(
+                value_of(&out, "disk_read").is_some(),
+                "{host}: no host disk totals"
+            );
         }
     }
 }

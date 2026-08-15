@@ -1,8 +1,8 @@
 //! Per-interface network traffic from `/proc/net/dev`.
 
 use sg_model::{
-    Entity, EntityKind, ParseResult, Request, Requirements, Responses, SampleSink, SeriesDescriptor,
-    Source, SourceDescriptor, SourceId, TargetCtx, Unit,
+    Entity, EntityKind, ParseResult, Request, Requirements, Responses, SampleSink,
+    SeriesDescriptor, Source, SourceDescriptor, SourceId, TargetCtx, Unit,
 };
 
 /// Cumulative counters for one interface.
@@ -43,13 +43,18 @@ pub fn parse_net_dev(text: &str) -> Vec<InterfaceStats> {
     let mut out = Vec::new();
 
     for line in text.lines() {
-        let Some((name, rest)) = line.split_once(':') else { continue };
+        let Some((name, rest)) = line.split_once(':') else {
+            continue;
+        };
         let name = name.trim();
         if name.is_empty() || name.contains(char::is_whitespace) {
             continue;
         }
 
-        let n: Vec<u64> = rest.split_whitespace().filter_map(|f| f.parse().ok()).collect();
+        let n: Vec<u64> = rest
+            .split_whitespace()
+            .filter_map(|f| f.parse().ok())
+            .collect();
         if n.len() < 16 {
             continue;
         }
@@ -105,7 +110,9 @@ impl Source for NetworkSource {
     }
 
     fn parse(&self, ctx: &TargetCtx, responses: &Responses, out: &mut SampleSink) -> ParseResult {
-        let Some(text) = responses.text(&Self::request()) else { return Ok(()) };
+        let Some(text) = responses.text(&Self::request()) else {
+            return Ok(());
+        };
         let id = &self.descriptor.id;
 
         let mut host_rx = 0u64;
@@ -152,7 +159,10 @@ impl Source for NetworkSource {
             SeriesDescriptor::counter(id, host, "net_rx", "Download", Unit::Bytes),
             host_rx,
         );
-        out.emit(SeriesDescriptor::counter(id, host, "net_tx", "Upload", Unit::Bytes), host_tx);
+        out.emit(
+            SeriesDescriptor::counter(id, host, "net_tx", "Upload", Unit::Bytes),
+            host_tx,
+        );
 
         Ok(())
     }
@@ -215,7 +225,10 @@ Inter-|   Receive                                                |  Transmit
                 "{host}: eth0 not found among {:?}",
                 out.entities.iter().map(|e| &e.display).collect::<Vec<_>>()
             );
-            assert!(value_of(&out, "net_rx").is_some(), "{host}: no host-level totals");
+            assert!(
+                value_of(&out, "net_rx").is_some(),
+                "{host}: no host-level totals"
+            );
         }
     }
 
@@ -237,8 +250,14 @@ Inter-|   Receive                                                |  Transmit
         let out = sink_for(&NetworkSource::default(), &ctx, &responses);
 
         let names: Vec<_> = out.entities.iter().map(|e| e.display.as_str()).collect();
-        assert!(!names.contains(&"veth9"), "idle veth should not clutter the interface list");
-        assert!(names.contains(&"lo"), "loopback should be listed even when idle");
+        assert!(
+            !names.contains(&"veth9"),
+            "idle veth should not clutter the interface list"
+        );
+        assert!(
+            names.contains(&"lo"),
+            "loopback should be listed even when idle"
+        );
         assert!(names.contains(&"eth0"));
     }
 
@@ -247,7 +266,11 @@ Inter-|   Receive                                                |  Transmit
         let (ctx, responses) = corpus("debian").literal("/proc/net/dev", SAMPLE).build();
         let out = sink_for(&NetworkSource::default(), &ctx, &responses);
 
-        let rx = out.descriptors.iter().find(|d| d.metric == "net_rx").unwrap();
+        let rx = out
+            .descriptors
+            .iter()
+            .find(|d| d.metric == "net_rx")
+            .unwrap();
         assert_eq!(rx.effective_unit(), Unit::BytesPerSecond);
     }
 }

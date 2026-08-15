@@ -23,7 +23,10 @@ fn fixture_key() -> PathBuf {
 fn spec(port: u16) -> ConnectionSpec {
     ConnectionSpec::new("127.0.0.1", "root")
         .port(port)
-        .auth(Auth::KeyFile { path: fixture_key(), passphrase: None })
+        .auth(Auth::KeyFile {
+            path: fixture_key(),
+            passphrase: None,
+        })
         // Fixture host keys are regenerated on every image build.
         .host_key_policy(HostKeyPolicy::AcceptAny)
 }
@@ -48,7 +51,9 @@ async fn fixture_up(port: u16) -> bool {
             std::env::var("SG_REQUIRE_FIXTURES").is_err(),
             "SG_REQUIRE_FIXTURES is set but nothing is listening on 127.0.0.1:{port}"
         );
-        eprintln!("SKIP: no fixture on 127.0.0.1:{port} (docker compose -f fixtures/compose.yml up -d)");
+        eprintln!(
+            "SKIP: no fixture on 127.0.0.1:{port} (docker compose -f fixtures/compose.yml up -d)"
+        );
     }
     reachable
 }
@@ -58,7 +63,11 @@ async fn session(port: u16) -> Option<SshSession> {
     if !fixture_up(port).await {
         return None;
     }
-    Some(SshSession::connect(spec(port)).await.expect("fixture connect"))
+    Some(
+        SshSession::connect(spec(port))
+            .await
+            .expect("fixture connect"),
+    )
 }
 
 macro_rules! session_or_skip {
@@ -76,10 +85,16 @@ async fn reads_proc_files_over_one_channel() {
 
     let stat = Request::read("/proc/stat");
     let meminfo = Request::read("/proc/meminfo");
-    let responses = session.batch(&[stat.clone(), meminfo.clone()]).await.unwrap();
+    let responses = session
+        .batch(&[stat.clone(), meminfo.clone()])
+        .await
+        .unwrap();
 
     let stat_body = responses.text(&stat).expect("/proc/stat readable");
-    assert!(stat_body.starts_with("cpu "), "unexpected /proc/stat: {stat_body:.60}");
+    assert!(
+        stat_body.starts_with("cpu "),
+        "unexpected /proc/stat: {stat_body:.60}"
+    );
     assert!(responses.text(&meminfo).unwrap().contains("MemTotal:"));
 
     session.close().await.unwrap();
@@ -108,8 +123,15 @@ async fn a_large_batch_costs_the_same_as_a_small_one() {
     let responses = session.batch(&many).await.unwrap();
     let large = t1.elapsed();
 
-    assert_eq!(responses.len(), 41, "every request should have produced a frame");
-    assert_eq!(responses.text(&Request::exec(["echo", "payload-17"])), Some("payload-17\n"));
+    assert_eq!(
+        responses.len(),
+        41,
+        "every request should have produced a frame"
+    );
+    assert_eq!(
+        responses.text(&Request::exec(["echo", "payload-17"])),
+        Some("payload-17\n")
+    );
 
     // 41 sequential channel opens on loopback would be an order of magnitude worse than this.
     assert!(
@@ -126,7 +148,10 @@ async fn missing_files_report_exit_codes_rather_than_failing_the_batch() {
 
     let missing = Request::read("/proc/does-not-exist");
     let present = Request::read("/proc/uptime");
-    let responses = session.batch(&[missing.clone(), present.clone()]).await.unwrap();
+    let responses = session
+        .batch(&[missing.clone(), present.clone()])
+        .await
+        .unwrap();
 
     assert_ne!(responses.get(&missing).unwrap().exit_code, 0);
     assert_eq!(responses.text(&missing), None);
@@ -145,10 +170,17 @@ async fn hostile_arguments_reach_the_program_as_literal_text() {
     let echo = Request::exec(["echo", hostile]);
     let canary = Request::read("/tmp/pwned");
 
-    let responses = session.batch(&[echo.clone(), canary.clone()]).await.unwrap();
+    let responses = session
+        .batch(&[echo.clone(), canary.clone()])
+        .await
+        .unwrap();
 
     assert_eq!(responses.text(&echo), Some(format!("{hostile}\n").as_str()));
-    assert_eq!(responses.text(&canary), None, "injected command executed — quoting is broken");
+    assert_eq!(
+        responses.text(&canary),
+        None,
+        "injected command executed — quoting is broken"
+    );
 
     session.close().await.unwrap();
 }
@@ -162,11 +194,17 @@ async fn payloads_impersonating_the_protocol_are_harmless() {
     let attack = Request::exec(["printf", "%s\\n%s\\n", forged, "still mine"]);
     let after = Request::read("/proc/uptime");
 
-    let responses = session.batch(&[attack.clone(), after.clone()]).await.unwrap();
+    let responses = session
+        .batch(&[attack.clone(), after.clone()])
+        .await
+        .unwrap();
 
     let body = responses.text(&attack).expect("frame survived");
     assert!(body.contains(forged) && body.contains("still mine"));
-    assert!(responses.text(&after).is_some(), "forged marker swallowed the following frame");
+    assert!(
+        responses.text(&after).is_some(),
+        "forged marker swallowed the following frame"
+    );
 
     session.close().await.unwrap();
 }
@@ -179,12 +217,23 @@ async fn detects_capabilities_of_a_gnu_host() {
     let caps = probe::parse(&responses);
 
     assert!(!caps.kernel.is_empty(), "kernel not detected");
-    assert!(caps.distro.contains("Debian"), "distro was {:?}", caps.distro);
+    assert!(
+        caps.distro.contains("Debian"),
+        "distro was {:?}",
+        caps.distro
+    );
     assert!(caps.cpu_count >= 1, "no CPUs detected");
     assert_eq!(caps.clock_ticks, 100);
     assert_eq!(caps.coreutils, sg_model::Coreutils::Gnu);
-    assert!(caps.has("ss") && caps.has("ip"), "iproute2 not detected: {:?}", caps.binaries);
-    assert!(!caps.has("nvidia-smi"), "detected a binary the image does not have");
+    assert!(
+        caps.has("ss") && caps.has("ip"),
+        "iproute2 not detected: {:?}",
+        caps.binaries
+    );
+    assert!(
+        !caps.has("nvidia-smi"),
+        "detected a binary the image does not have"
+    );
     assert!(caps.has_path("/proc/stat") && caps.has_path("/proc/diskstats"));
 
     session.close().await.unwrap();
@@ -197,7 +246,11 @@ async fn detects_capabilities_of_a_busybox_host() {
     let responses = session.batch(&probe::requests()).await.unwrap();
     let caps = probe::parse(&responses);
 
-    assert!(caps.distro.contains("Alpine"), "distro was {:?}", caps.distro);
+    assert!(
+        caps.distro.contains("Alpine"),
+        "distro was {:?}",
+        caps.distro
+    );
     assert_eq!(
         caps.coreutils,
         sg_model::Coreutils::Busybox,
@@ -221,5 +274,8 @@ async fn authentication_failure_is_not_transient() {
         Ok(_) => panic!("password auth should have been refused"),
     };
 
-    assert!(!err.is_transient(), "auth failure would be retried in a loop: {err}");
+    assert!(
+        !err.is_transient(),
+        "auth failure would be retried in a loop: {err}"
+    );
 }

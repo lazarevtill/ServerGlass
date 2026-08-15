@@ -60,11 +60,17 @@ impl RateEngine {
                 out.push(sample);
                 continue;
             }
-            let Some(raw) = sample.value.as_counter() else { continue };
+            let Some(raw) = sample.value.as_counter() else {
+                continue;
+            };
 
-            let previous = self
-                .previous
-                .insert(sample.series.clone(), Previous { at_ms: sample.at_ms, raw });
+            let previous = self.previous.insert(
+                sample.series.clone(),
+                Previous {
+                    at_ms: sample.at_ms,
+                    raw,
+                },
+            );
 
             let Some(previous) = previous else { continue };
             let elapsed_ms = sample.at_ms - previous.at_ms;
@@ -123,9 +129,16 @@ mod tests {
         let rx = counter("rx", Unit::Bytes, 1.0);
         let mut engine = RateEngine::new();
 
-        let out = engine.process(&[rx.clone()], vec![sample(&rx, 1_000, 500)]);
-        assert!(out.is_empty(), "first sighting produced a value out of thin air");
-        assert_eq!(engine.tracked(), 1, "the reading should still be remembered");
+        let out = engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 1_000, 500)]);
+        assert!(
+            out.is_empty(),
+            "first sighting produced a value out of thin air"
+        );
+        assert_eq!(
+            engine.tracked(),
+            1,
+            "the reading should still be remembered"
+        );
     }
 
     #[test]
@@ -133,8 +146,8 @@ mod tests {
         let rx = counter("rx", Unit::Bytes, 1.0);
         let mut engine = RateEngine::new();
 
-        engine.process(&[rx.clone()], vec![sample(&rx, 1_000, 1_000)]);
-        let out = engine.process(&[rx.clone()], vec![sample(&rx, 3_000, 5_000)]);
+        engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 1_000, 1_000)]);
+        let out = engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 3_000, 5_000)]);
 
         // 4000 bytes over 2 seconds.
         assert_eq!(out.len(), 1);
@@ -148,9 +161,9 @@ mod tests {
         let rx = counter("rx", Unit::Bytes, 1.0);
         let mut engine = RateEngine::new();
 
-        engine.process(&[rx.clone()], vec![sample(&rx, 0, 0)]);
+        engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 0, 0)]);
         // A 3.5-second gap after a 1-second refresh was requested.
-        let out = engine.process(&[rx.clone()], vec![sample(&rx, 3_500, 7_000)]);
+        let out = engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 3_500, 7_000)]);
         assert_eq!(out[0].value.as_f64(), Some(2_000.0));
     }
 
@@ -161,12 +174,12 @@ mod tests {
         let rx = counter("rx", Unit::Bytes, 1.0);
         let mut engine = RateEngine::new();
 
-        engine.process(&[rx.clone()], vec![sample(&rx, 0, 9_000_000)]);
-        let out = engine.process(&[rx.clone()], vec![sample(&rx, 1_000, 42)]);
+        engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 0, 9_000_000)]);
+        let out = engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 1_000, 42)]);
         assert!(out.is_empty(), "counter reset produced a phantom spike");
 
         // The new baseline is adopted, so the tick after the reset works normally again.
-        let out = engine.process(&[rx.clone()], vec![sample(&rx, 2_000, 1_042)]);
+        let out = engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 2_000, 1_042)]);
         assert_eq!(out[0].value.as_f64(), Some(1_000.0));
     }
 
@@ -175,8 +188,8 @@ mod tests {
         let rx = counter("rx", Unit::Bytes, 1.0);
         let mut engine = RateEngine::new();
 
-        engine.process(&[rx.clone()], vec![sample(&rx, 5_000, 1)]);
-        let out = engine.process(&[rx.clone()], vec![sample(&rx, 5_000, 99)]);
+        engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 5_000, 1)]);
+        let out = engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 5_000, 99)]);
         assert!(out.is_empty());
     }
 
@@ -187,12 +200,16 @@ mod tests {
         let cpu = counter("cpu", Unit::Percent, 100.0 / 100.0);
         let mut engine = RateEngine::new();
 
-        engine.process(&[cpu.clone()], vec![sample(&cpu, 0, 0)]);
-        let out = engine.process(&[cpu.clone()], vec![sample(&cpu, 1_000, 100)]);
-        assert_eq!(out[0].value.as_f64(), Some(100.0), "a fully busy core should read 100%");
+        engine.process(std::slice::from_ref(&cpu), vec![sample(&cpu, 0, 0)]);
+        let out = engine.process(std::slice::from_ref(&cpu), vec![sample(&cpu, 1_000, 100)]);
+        assert_eq!(
+            out[0].value.as_f64(),
+            Some(100.0),
+            "a fully busy core should read 100%"
+        );
 
         // Half a core over two seconds.
-        let out = engine.process(&[cpu.clone()], vec![sample(&cpu, 3_000, 200)]);
+        let out = engine.process(std::slice::from_ref(&cpu), vec![sample(&cpu, 3_000, 200)]);
         assert_eq!(out[0].value.as_f64(), Some(50.0));
     }
 
@@ -202,7 +219,7 @@ mod tests {
         let mut engine = RateEngine::new();
 
         let out = engine.process(
-            &[usage.clone()],
+            std::slice::from_ref(&usage),
             vec![Sample::new(usage.id.clone(), 1_000, 42.5_f64)],
         );
         assert_eq!(out.len(), 1);
@@ -226,12 +243,15 @@ mod tests {
         let rx = counter("rx", Unit::Bytes, 1.0);
         let mut engine = RateEngine::new();
 
-        engine.process(&[rx.clone()], vec![sample(&rx, 0, 1_000_000)]);
+        engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 0, 1_000_000)]);
         engine.reset();
         assert_eq!(engine.tracked(), 0);
 
-        let out = engine.process(&[rx.clone()], vec![sample(&rx, 60_000, 5_000)]);
-        assert!(out.is_empty(), "the first reading after a reconnect must re-baseline");
+        let out = engine.process(std::slice::from_ref(&rx), vec![sample(&rx, 60_000, 5_000)]);
+        assert!(
+            out.is_empty(),
+            "the first reading after a reconnect must re-baseline"
+        );
     }
 
     #[test]
@@ -242,11 +262,18 @@ mod tests {
 
         let descriptors = [rx.clone(), tx.clone()];
         engine.process(&descriptors, vec![sample(&rx, 0, 0), sample(&tx, 0, 0)]);
-        let out = engine.process(&descriptors, vec![sample(&rx, 1_000, 10), sample(&tx, 1_000, 30)]);
+        let out = engine.process(
+            &descriptors,
+            vec![sample(&rx, 1_000, 10), sample(&tx, 1_000, 30)],
+        );
 
         assert_eq!(out.len(), 2);
         let value = |metric: &SeriesDescriptor| {
-            out.iter().find(|s| s.series == metric.id).unwrap().value.as_f64()
+            out.iter()
+                .find(|s| s.series == metric.id)
+                .unwrap()
+                .value
+                .as_f64()
         };
         assert_eq!(value(&rx), Some(10.0));
         assert_eq!(value(&tx), Some(30.0));
