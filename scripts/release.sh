@@ -110,6 +110,18 @@ echo "artefacts in $DIST:"
 ls -1 "$DIST"
 
 # ------------------------------------------------------------ GitLab release
+
+# The release description. Kept out of the JSON literal so quoting stays readable; newlines are
+# escaped because the description is embedded in a JSON string.
+release_notes() {
+    printf '%s' "Agentless server monitoring over SSH. Nothing is installed on the monitored host.\\n\\n\\
+**macOS** — open the .dmg and drag ServerGlass to Applications. The build is ad-hoc signed rather \\
+than notarised, so the first launch needs right-click > Open.\\n\\n\\
+**Android** — install the .apk. Signed with this project's own key, so you may need to allow \\
+installs from your browser or file manager.\\n\\n\\
+Built from $(git rev-parse --short HEAD)."
+}
+
 if [[ -n $PUBLISH ]]; then
     : "${SG_GITLAB_TOKEN:?set SG_GITLAB_TOKEN to a token with api scope}"
     API=https://gitlab.lazarev.cloud/api/v4/projects/lazarevtill%2Fserverglass
@@ -120,8 +132,10 @@ if [[ -n $PUBLISH ]]; then
     # fetching one with an API token returns the login page, so a release whose assets point there
     # is only downloadable by someone already signed in. Package registry files are fetchable with
     # a token, and anonymously when the project is public.
+    # Only this version's artefacts. `"$DIST"/*` would re-upload every older build under the new
+    # version's path, so 0.1.1's dmg would be published as a 0.1.2 asset.
     LINKS=""
-    for file in "$DIST"/*; do
+    for file in "$DIST"/ServerGlass-"$VERSION"-*; do
         name=$(basename "$file")
         curl -sS --fail -H "PRIVATE-TOKEN: $SG_GITLAB_TOKEN" \
             --upload-file "$file" \
@@ -131,5 +145,14 @@ if [[ -n $PUBLISH ]]; then
     done
     LINKS=${LINKS%,}
 
-    echo "    release v$VERSION created"
+    # Create the release itself. Without this the files sit in the package registry with nothing
+    # pointing at them, and the Releases page stays empty.
+    echo "==> creating the release"
+    curl -sS --fail -X POST -H "PRIVATE-TOKEN: $SG_GITLAB_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"name\":\"v$VERSION\",\"tag_name\":\"v$VERSION\",\"ref\":\"main\",\
+             \"description\":\"$(release_notes)\",\"assets\":{\"links\":[$LINKS]}}" \
+        "$API/releases" >/dev/null
+
+    echo "    release v$VERSION created: https://gitlab.lazarev.cloud/lazarevtill/serverglass/-/releases/v$VERSION"
 fi
