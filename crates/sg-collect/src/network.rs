@@ -75,6 +75,14 @@ pub fn parse_net_dev(text: &str) -> Vec<InterfaceStats> {
     out
 }
 
+/// Argv for the sysfs hardware-interface probe. A constant so the tests exercise the exact command
+/// the collector issues, rather than a copy that can drift away from it.
+pub const PHYSICAL_ARGV: [&str; 3] = [
+    "sh",
+    "-c",
+    "for d in /sys/class/net/*; do [ -e \"$d/device\" ] && echo \"${d##*/}\"; done; exit 0",
+];
+
 pub struct NetworkSource {
     descriptor: SourceDescriptor,
 }
@@ -98,6 +106,25 @@ impl NetworkSource {
     fn request() -> Request {
         Request::read("/proc/net/dev")
     }
+
+    /// Interfaces backed by real hardware — those with a `device` link in sysfs.
+    ///
+    /// Summing every non-loopback interface inflates the host total on any machine that bridges.
+    /// On a Proxmox host, traffic to the host's own address is counted on the physical port *and*
+    /// again on `vmbr0`; VM traffic is counted on the port *and* again on each `tap`/`veth`. The
+    /// figure ends up two to four times the real wire rate, presented as the largest number on the
+    /// panel.
+    ///
+    /// Rather than blocklisting name patterns (`vmbr*`, `veth*`, `fwln*`, …), which is endless and
+    /// wrong the moment someone renames an interface, this asks the kernel: a NIC has
+    /// `/sys/class/net/<name>/device`, and bridges, bonds, VLANs, taps and veths do not. Bonds and
+    /// VLANs are excluded for the same reason and stay correct, because their slaves are counted.
+    ///
+    /// The `exit 0` matters: a `for` loop reports its last iteration's status, so without it a
+    /// host whose last interface is virtual returns non-zero and the whole reply is discarded.
+    fn physical_request() -> Request {
+        Request::exec(PHYSICAL_ARGV)
+    }
 }
 
 impl Source for NetworkSource {
@@ -106,7 +133,7 @@ impl Source for NetworkSource {
     }
 
     fn requests(&self, _ctx: &TargetCtx) -> Vec<Request> {
-        vec![Self::request()]
+        vec![Self::request(), Self::physical_request()]
     }
 
     fn parse(&self, ctx: &TargetCtx, responses: &Responses, out: &mut SampleSink) -> ParseResult {
@@ -114,6 +141,22 @@ impl Source for NetworkSource {
             return Ok(());
         };
         let id = &self.descriptor.id;
+
+        let physical: std::collections::HashSet<&str> = responses
+            .text(&Self::physical_request())
+            .map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default();
+
+        // Inside a container every interface is one half of a veth pair and none has a `device`
+        // link, so an empty set means "this host has no hardware to distinguish" rather than
+        // "nothing counts". Falling back to every non-loopback interface keeps container and VM
+        // targets reporting real traffic instead of a flat zero.
+        let counts_toward_total = |iface: &InterfaceStats| {
+            if iface.is_loopback() {
+                return false;
+            }
+            physical.is_empty() || physical.contains(iface.name.as_str())
+        };
 
         let mut host_rx = 0u64;
         let mut host_tx = 0u64;
@@ -125,13 +168,17 @@ impl Source for NetworkSource {
                 continue;
             }
 
-            if !iface.is_loopback() {
+            if counts_toward_total(&iface) {
                 host_rx += iface.rx_bytes;
                 host_tx += iface.tx_bytes;
             }
 
             let entity = Entity::child(&ctx.host, EntityKind::NetworkInterface, &iface.name)
-                .with_label("loopback", iface.is_loopback().to_string());
+                .with_label("loopback", iface.is_loopback().to_string())
+                .with_label(
+                    "physical",
+                    physical.contains(iface.name.as_str()).to_string(),
+                );
 
             for (metric, display, value, unit) in [
                 ("rx_bytes", "Received", iface.rx_bytes, Unit::Bytes),
@@ -259,6 +306,59 @@ Inter-|   Receive                                                |  Transmit
             "loopback should be listed even when idle"
         );
         assert!(names.contains(&"eth0"));
+    }
+
+    /// A Proxmox host: one physical port, the bridge it is enslaved to, a VM tap and the firewall
+    /// veth pair. Every one of those carries bytes, and summing them all reports several times the
+    /// real wire rate.
+    const PROXMOX: &str = "\
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 500 5 0 0 0 0 0 0 500 5 0 0 0 0 0 0
+  eno1: 1000 10 0 0 0 0 0 0 2000 20 0 0 0 0 0 0
+ vmbr0: 1000 10 0 0 0 0 0 0 2000 20 0 0 0 0 0 0
+tap100i0: 800 8 0 0 0 0 0 0 1600 16 0 0 0 0 0 0
+fwln100i0: 800 8 0 0 0 0 0 0 1600 16 0 0 0 0 0 0
+";
+
+    #[test]
+    fn host_totals_count_only_hardware_interfaces() {
+        let (ctx, responses) = corpus("debian")
+            .literal("/proc/net/dev", PROXMOX)
+            // Only eno1 has a sysfs `device` link; the bridge, tap and veth do not.
+            .exec_literal(&PHYSICAL_ARGV, "eno1\n")
+            .build();
+        let out = sink_for(&NetworkSource::default(), &ctx, &responses);
+
+        // Naively summing every non-loopback interface gives 3600 down / 7200 up — two to four
+        // times the truth, presented as the largest number on the panel.
+        assert_eq!(
+            value_of(&out, "net_rx"),
+            Some(1000.0),
+            "bridged traffic was double-counted"
+        );
+        assert_eq!(value_of(&out, "net_tx"), Some(2000.0));
+
+        // The virtual interfaces are still listed; they are just not summed.
+        let names: Vec<_> = out.entities.iter().map(|e| e.display.as_str()).collect();
+        assert!(names.contains(&"vmbr0") && names.contains(&"tap100i0"));
+    }
+
+    /// Inside a container every interface is a veth with no `device` link. An empty physical set
+    /// must mean "cannot distinguish", not "nothing counts".
+    #[test]
+    fn a_host_with_no_hardware_interfaces_still_reports_traffic() {
+        let (ctx, responses) = corpus("debian")
+            .literal("/proc/net/dev", SAMPLE)
+            .exec_literal(&PHYSICAL_ARGV, "")
+            .build();
+        let out = sink_for(&NetworkSource::default(), &ctx, &responses);
+
+        assert_eq!(
+            value_of(&out, "net_rx"),
+            Some(41165.0),
+            "container traffic reported as zero"
+        );
     }
 
     #[test]

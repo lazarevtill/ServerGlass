@@ -84,6 +84,11 @@ extension EntityView {
     func gauge(_ metric: String) -> MetricGauge? {
         gauges.first { $0.metric == metric }
     }
+
+    /// Combined rate across two directions, for ranking. Both values are already per-second.
+    func throughput(_ first: String, _ second: String) -> Double {
+        (gauge(first)?.value ?? 0) + (gauge(second)?.value ?? 0)
+    }
 }
 
 /// A titled section. Everything on the detail page lives in one of these, so the page reads as a

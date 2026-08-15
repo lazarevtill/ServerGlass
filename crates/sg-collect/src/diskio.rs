@@ -100,6 +100,14 @@ fn parent_device<'a>(name: &str, all: &'a [DiskStats]) -> Option<&'a str> {
         .max_by_key(|candidate| candidate.len())
 }
 
+/// Argv for the sysfs stacked-device probe. Shared with the tests so they cannot drift.
+pub const STACKED_ARGV: [&str; 3] = [
+    "sh",
+    "-c",
+    "for d in /sys/block/*; do [ -d \"$d/slaves\" ] && \
+     [ -n \"$(ls -A \"$d/slaves\" 2>/dev/null)\" ] && echo \"${d##*/}\"; done; exit 0",
+];
+
 pub struct DiskIoSource {
     descriptor: SourceDescriptor,
 }
@@ -123,6 +131,20 @@ impl DiskIoSource {
     fn request() -> Request {
         Request::read("/proc/diskstats")
     }
+
+    /// Block devices built on top of other block devices.
+    ///
+    /// [`parent_device`] only recognises real partitions, because it matches on the name. But an
+    /// LVM volume (`dm-0`), an mdraid array (`md0`) or a ZFS zvol (`zd0`) is not named after what
+    /// it sits on, so its bytes were added to the host total *on top of* the `sda`/`nvme0n1` bytes
+    /// carrying exactly the same I/O. A default Proxmox install is LVM-thin, so the headline read
+    /// and write figures were roughly doubled.
+    ///
+    /// The kernel already knows the answer: a stacked device lists what it is built from in
+    /// `/sys/block/<dev>/slaves`. Asking beats guessing from names.
+    fn stacked_request() -> Request {
+        Request::exec(STACKED_ARGV)
+    }
 }
 
 impl Source for DiskIoSource {
@@ -131,7 +153,7 @@ impl Source for DiskIoSource {
     }
 
     fn requests(&self, _ctx: &TargetCtx) -> Vec<Request> {
-        vec![Self::request()]
+        vec![Self::request(), Self::stacked_request()]
     }
 
     fn parse(&self, ctx: &TargetCtx, responses: &Responses, out: &mut SampleSink) -> ParseResult {
@@ -140,6 +162,11 @@ impl Source for DiskIoSource {
         };
         let all = parse_diskstats(text);
         let id = &self.descriptor.id;
+
+        let stacked: std::collections::HashSet<&str> = responses
+            .text(&Self::stacked_request())
+            .map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default();
 
         let mut host_read = 0u64;
         let mut host_write = 0u64;
@@ -150,14 +177,22 @@ impl Source for DiskIoSource {
             }
 
             let is_partition = parent_device(&disk.name, &all).is_some();
-            // Only whole devices contribute to the host total; adding partitions as well would
-            // double-count every byte.
-            if !is_partition {
+            // A device that sits on top of others reports the same bytes they do.
+            //
+            // `slaves` is the reliable signal and covers LVM and mdraid. ZFS zvols are the gap: the
+            // pool is made of raw disks and ZFS does not populate `slaves`, so `zd*` is excluded by
+            // name as well. Both matter on the Proxmox hosts this is aimed at.
+            let is_stacked = stacked.contains(disk.name.as_str()) || disk.name.starts_with("zd");
+
+            // Only whole, unstacked devices contribute to the host total; counting partitions or
+            // mapped devices as well would double-count every byte.
+            if !is_partition && !is_stacked {
                 host_read += disk.read_bytes();
                 host_write += disk.write_bytes();
             }
 
-            let mut entity = Entity::child(&ctx.host, EntityKind::Disk, &disk.name);
+            let mut entity = Entity::child(&ctx.host, EntityKind::Disk, &disk.name)
+                .with_label("stacked", is_stacked.to_string());
             if let Some(parent) = parent_device(&disk.name, &all) {
                 entity = entity.with_label("partition_of", parent);
             }
@@ -299,6 +334,64 @@ mod tests {
         assert_eq!(
             part.labels.get("partition_of").map(String::as_str),
             Some("nvme0n1")
+        );
+    }
+
+    /// A default Proxmox install: LVM-thin volumes and a ZFS zvol layered over one NVMe device.
+    /// Every layer reports the same bytes, so summing them all doubles the headline figures.
+    const STACKED: &str = "\
+ 259 0 nvme0n1 100 0 2000 50 200 0 4000 90 0 140 0
+ 259 1 nvme0n1p1 40 0 800 20 60 0 1200 30 0 50 0
+ 252 0 dm-0 90 0 1800 45 180 0 3600 85 0 130 0
+ 252 1 dm-1 10 0 200 5 20 0 400 5 0 10 0
+ 230 0 zd0 30 0 600 15 40 0 800 20 0 20 0
+";
+
+    #[test]
+    fn host_totals_exclude_devices_stacked_on_other_devices() {
+        let (ctx, responses) = corpus("debian")
+            .literal("/proc/diskstats", STACKED)
+            // The kernel reports dm-0 and dm-1 as built on nvme0n1; ZFS does not populate slaves.
+            .exec_literal(&STACKED_ARGV, "dm-0\ndm-1\n")
+            .build();
+        let out = sink_for(&DiskIoSource::default(), &ctx, &responses);
+
+        // Only nvme0n1 counts: 2000 sectors. Summing the LVM volumes and the zvol as well would
+        // report 4600 sectors — more than double the real throughput.
+        assert_eq!(
+            value_of(&out, "disk_read"),
+            Some(2000.0 * 512.0),
+            "LVM/zvol layers were counted on top of the device carrying the I/O"
+        );
+        assert_eq!(value_of(&out, "disk_write"), Some(4000.0 * 512.0));
+
+        // They remain listed as devices, labelled so the UI can group them.
+        let dm0 = out
+            .entities
+            .iter()
+            .find(|e| e.display == "dm-0")
+            .expect("dm-0 listed");
+        assert_eq!(dm0.labels.get("stacked").map(String::as_str), Some("true"));
+        let nvme = out
+            .entities
+            .iter()
+            .find(|e| e.display == "nvme0n1")
+            .unwrap();
+        assert_eq!(
+            nvme.labels.get("stacked").map(String::as_str),
+            Some("false")
+        );
+    }
+
+    /// A host without sysfs `slaves` (or one where the probe failed) must still report the plain
+    /// devices rather than nothing.
+    #[test]
+    fn a_host_without_slaves_information_still_reports_totals() {
+        let (ctx, responses) = corpus("debian").literal("/proc/diskstats", SAMPLE).build();
+        let out = sink_for(&DiskIoSource::default(), &ctx, &responses);
+        assert_eq!(
+            value_of(&out, "disk_read"),
+            Some((2000 + 10) as f64 * 512.0)
         );
     }
 

@@ -80,6 +80,16 @@ impl CorpusBuilder {
         self
     }
 
+    /// Serve literal output for a command, for shapes no captured host produces on demand.
+    pub fn exec_literal(mut self, argv: &[&str], body: &str) -> Self {
+        self.responses
+            .insert(Request::exec(argv.iter().copied()).id(), Response::ok(body));
+        if let Some(program) = argv.first() {
+            self.binaries.insert((*program).to_string());
+        }
+        self
+    }
+
     /// Serve a non-zero exit for `path`, as a host lacking that file would.
     pub fn missing(mut self, path: &str) -> Self {
         self.responses

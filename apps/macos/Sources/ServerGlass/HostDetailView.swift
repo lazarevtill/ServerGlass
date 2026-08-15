@@ -107,6 +107,12 @@ struct HostDetailView: View {
         }
     }
 
+    /// "6 of 23" when the list is capped, "4 devices" when it is not. Silent truncation reads as
+    /// "this is everything", which on a Proxmox host with two dozen block devices is a lie.
+    static func shown(_ count: Int, cap: Int) -> String {
+        count > cap ? "\(cap) of \(count)" : "\(count)"
+    }
+
     private var loadDetail: String? {
         guard let five = snapshot.gauge("load5"), let fifteen = snapshot.gauge("load15") else {
             return nil
@@ -206,9 +212,11 @@ struct HostDetailView: View {
     private var networkPanel: some View {
         let interfaces = snapshot.entities(ofKind: "net")
             .filter { ($0.gauge("rx_bytes")?.value ?? 0) > 0 || ($0.gauge("tx_bytes")?.value ?? 0) > 0 }
-            .sorted { ($0.gauge("rx_bytes")?.value ?? 0) > ($1.gauge("rx_bytes")?.value ?? 0) }
+            // Rank by combined traffic. Sorting on receive alone buries a send-heavy uplink
+            // below idle interfaces and then truncation hides it entirely.
+            .sorted { $0.throughput("rx_bytes", "tx_bytes") > $1.throughput("rx_bytes", "tx_bytes") }
 
-        return Panel(title: "Network") {
+        return Panel(title: "Network", subtitle: Self.shown(interfaces.count, cap: 6)) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 14) {
                     if let rx = snapshot.gauge("net_rx") {
@@ -237,9 +245,11 @@ struct HostDetailView: View {
 
     private var diskPanel: some View {
         let disks = snapshot.entities(ofKind: "disk")
-            .sorted { ($0.gauge("read_bytes")?.value ?? 0) > ($1.gauge("read_bytes")?.value ?? 0) }
+            // Combined, for the same reason: reads served from ZFS ARC leave a write-heavy pool
+            // reading zero, which would sort the busiest device on the box last and then cut it.
+            .sorted { $0.throughput("read_bytes", "write_bytes") > $1.throughput("read_bytes", "write_bytes") }
 
-        return Panel(title: "Disk I/O") {
+        return Panel(title: "Disk I/O", subtitle: Self.shown(disks.count, cap: 6)) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 14) {
                     if let read = snapshot.gauge("disk_read") {
