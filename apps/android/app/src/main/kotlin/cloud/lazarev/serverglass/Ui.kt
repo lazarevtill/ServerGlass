@@ -32,6 +32,8 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -535,6 +537,37 @@ fun HostList(
             FilledTonalButton(onClick = onAdd) { Text("Add") }
         }
 
+        // Which row is showing its menu, and which is being confirmed for removal. Held here
+        // rather than per row so only one can ever be open.
+        var menuFor by remember { mutableStateOf<String?>(null) }
+        var confirmingRemoval by remember { mutableStateOf<Host?>(null) }
+
+        confirmingRemoval?.let { doomed ->
+            val name = doomed.snapshot.displayName.ifEmpty { doomed.address }
+            AlertDialog(
+                onDismissRequest = { confirmingRemoval = null },
+                title = { Text("Remove $name?") },
+                text = {
+                    Text(
+                        "ServerGlass stops watching it and forgets its password. The server " +
+                            "itself is not touched.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmingRemoval = null
+                        model.removeHost(doomed.id)
+                    }) { Text("Remove", color = Theme.bad) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmingRemoval = null }) { Text("Cancel") }
+                },
+                containerColor = Theme.panel,
+                titleContentColor = Theme.primary,
+                textContentColor = Theme.secondary,
+            )
+        }
+
         if (model.hosts.isEmpty()) {
             EmptyState(onAdd)
         } else {
@@ -554,9 +587,11 @@ fun HostList(
                             )
                             .combinedClickable(
                                 onClick = { model.selection = host.id },
-                                // Long press is the Android idiom for "act on this row", and the
-                                // only one available without a swipe library.
-                                onLongClick = { onEdit(host.id) },
+                                // Long press is the Android idiom for "act on this row" — and it
+                                // has to *offer* the actions. Opening the edit form directly gave
+                                // no way to remove a server and no way to back out of an edit
+                                // nobody asked for.
+                                onLongClick = { menuFor = host.id },
                             )
                             .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -568,6 +603,36 @@ fun HostList(
                                 .background(Theme.health(host.snapshot.health.level)),
                         )
                         Spacer(Modifier.width(12.dp))
+                        Box {
+                            // Anchored to the row it acts on, and carrying the same two actions
+                            // the Apple context menu carries.
+                            DropdownMenu(
+                                expanded = menuFor == host.id,
+                                onDismissRequest = { menuFor = null },
+                                containerColor = Theme.panel,
+                            ) {
+                                // A host with no saved record — the development demo host — has
+                                // nothing to edit, and offering it would open a form that could
+                                // not save anywhere. Asking the store rather than trusting the
+                                // identifier: the demo host carries one and was never written.
+                                if (model.saved(host.id) != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Edit…", color = Theme.primary) },
+                                        onClick = {
+                                            menuFor = null
+                                            onEdit(host.id)
+                                        },
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Remove", color = Theme.bad) },
+                                    onClick = {
+                                        menuFor = null
+                                        confirmingRemoval = host
+                                    },
+                                )
+                            }
+                        }
                         Column(Modifier.weight(1f)) {
                             Text(
                                 host.snapshot.displayName.ifEmpty { host.address },

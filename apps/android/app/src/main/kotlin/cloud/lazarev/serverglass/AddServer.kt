@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -64,6 +65,27 @@ fun AddServerDialog(
 ) {
     val saved = remember(editing) { editing?.let { model.saved(it) } }
     val isEditing = saved != null
+
+    // Asked to edit something with no saved record — the development demo host, or a record
+    // removed underneath us. Falling through would silently present a blank *Add* form, which is
+    // how a long press on an existing server ended up offering to create a new one.
+    if (editing != null && saved == null) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Nothing to edit") },
+            text = {
+                Text(
+                    "This server was not saved — it was added for testing and disappears when " +
+                        "the app closes. Add it properly to change its settings.",
+                )
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+            containerColor = Theme.panel,
+            titleContentColor = Theme.primary,
+            textContentColor = Theme.secondary,
+        )
+        return
+    }
 
     var address by remember { mutableStateOf(saved?.address ?: "") }
     var port by remember { mutableStateOf(saved?.port?.toString() ?: "22") }
