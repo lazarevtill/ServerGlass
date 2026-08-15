@@ -57,8 +57,10 @@ public struct ContentView: View {
         private var stackLayout: some View {
             NavigationStack {
                 List {
-                    NavigationLink(value: Selection.statusID) {
-                        Label("All hosts", systemImage: "square.grid.2x2")
+                    if model.hosts.count > 1 {
+                        NavigationLink(value: Selection.statusID) {
+                            Label("All hosts", systemImage: "square.grid.2x2")
+                        }
                     }
                     Section("Hosts") {
                         ForEach(model.hosts) { host in
@@ -137,9 +139,14 @@ struct Sidebar: View {
 
     var body: some View {
         List(selection: $model.selection) {
-            Label("Status", systemImage: "square.grid.2x2")
-                .font(.system(size: 12, weight: .medium))
-                .tag(Selection.statusID)
+            // The all-hosts grid answers "is anything on fire across the fleet". With one server
+            // that question is the same as the one the detail page already answers, so the entry
+            // only appears once it means something.
+            if model.hosts.count > 1 {
+                Label("All hosts", systemImage: "square.grid.2x2")
+                    .font(.system(size: 12, weight: .medium))
+                    .tag(Selection.statusID)
+            }
 
             Section("Hosts") {
                 ForEach(model.hosts) { host in

@@ -166,15 +166,24 @@ struct StatCell: View {
 
 /// Scaled to the observed range, not to zero: a byte rate hovering between 4.0 and 4.2 MiB/s draws
 /// as a flat line against a zero baseline and tells the reader nothing.
+///
+/// But range-scaling alone lies in the opposite direction. Storage sitting at 5.19% and ticking to
+/// 5.20% has a span of 0.01, which stretched to full height draws a cliff — the chart screams that
+/// the disk just filled up. So the span is floored at a fraction of the magnitude: genuinely flat
+/// series draw flat, and only real movement gets amplified.
 struct Sparkline: View {
     let values: [Double]
     let color: Color
+    /// Minimum span as a fraction of the largest value. 5% keeps noise flat without flattening
+    /// changes a person would care about.
+    var noiseFloor: Double = 0.05
 
     var body: some View {
         GeometryReader { geometry in
             let lowest = values.min() ?? 0
             let highest = values.max() ?? 1
-            let span = highest - lowest
+            let magnitude = Swift.max(abs(highest), abs(lowest))
+            let span = Swift.max(highest - lowest, magnitude * noiseFloor)
             let width = geometry.size.width
             let height = geometry.size.height
 

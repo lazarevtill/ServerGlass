@@ -1,9 +1,11 @@
 package cloud.lazarev.serverglass
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,9 +28,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uniffi.sg_ffi.HostHealth
@@ -43,6 +53,9 @@ import uniffi.sg_ffi.SimpleTile
 object Theme {
     val background = Color(0xFF0B0B0D)
     val panel = Color(0xFF15151A)
+    /// Slightly lifted from `panel`, for the larger simple-view cards. One flat surface colour at
+    /// every size makes big cards read as empty space.
+    val card = Color(0xFF19191D)
     val border = Color(0x0FFFFFFF)
     val track = Color(0x14FFFFFF)
 
@@ -63,26 +76,122 @@ object Theme {
     }
 }
 
+/**
+ * A ring gauge, drawn only for readings that have a maximum.
+ *
+ * Deliberately the same shape, weight and colour rule as the Apple apps: a person moving between
+ * their phone and their desk should not have to relearn the dashboard.
+ */
+@Composable
+fun RingGauge(
+    fraction: Double?,
+    color: Color,
+    label: String,
+    diameter: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.size(diameter), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = if (diameter > 90.dp) 8.dp.toPx() else 6.dp.toPx()
+            val inset = stroke / 2
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            drawArc(
+                color = Theme.track,
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            fraction?.let {
+                drawArc(
+                    color = color,
+                    startAngle = -90f,
+                    sweepAngle = (it.coerceIn(0.0, 1.0) * 360).toFloat(),
+                    useCenter = false,
+                    topLeft = Offset(inset, inset),
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+            }
+        }
+        Text(
+            label,
+            color = Theme.primary,
+            fontSize = if (diameter > 90.dp) 21.sp else 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * A trend line over the recent window.
+ *
+ * Scaled to the observed range so small real movement is visible — but the span is floored at a
+ * fraction of the magnitude, because storage ticking from 5.19% to 5.20% stretched to full height
+ * draws a cliff and tells the reader the disk just filled up.
+ */
+@Composable
+fun Sparkline(values: List<Double>, color: Color, modifier: Modifier = Modifier) {
+    if (values.size < 2) return
+    Canvas(modifier) {
+        val lowest = values.min()
+        val highest = values.max()
+        val magnitude = maxOf(kotlin.math.abs(highest), kotlin.math.abs(lowest))
+        val span = maxOf(highest - lowest, magnitude * 0.05)
+
+        val points = values.mapIndexed { index, value ->
+            val x = size.width * index / (values.size - 1).toFloat()
+            val normalised = if (span > 0) ((value - lowest) / span) else 0.5
+            Offset(x, size.height - (normalised * size.height).toFloat())
+        }
+
+        // A faint fill under the line: at this height a 1px stroke alone has no shape to read.
+        val fill = Path().apply {
+            moveTo(points.first().x, size.height)
+            points.forEach { lineTo(it.x, it.y) }
+            lineTo(points.last().x, size.height)
+            close()
+        }
+        drawPath(fill, color.copy(alpha = 0.14f))
+
+        val line = Path().apply {
+            moveTo(points.first().x, points.first().y)
+            points.drop(1).forEach { lineTo(it.x, it.y) }
+        }
+        drawPath(line, color.copy(alpha = 0.9f), style = Stroke(width = 1.6.dp.toPx()))
+    }
+}
+
 @Composable
 fun HealthCard(health: HostHealth, name: String, modifier: Modifier = Modifier) {
     val tint = Theme.health(health.level)
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(tint.copy(alpha = 0.10f))
-            .border(1.dp, tint.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
-            .padding(14.dp),
+            .clip(RoundedCornerShape(16.dp))
+            // A gradient rather than a flat wash: at this size a solid block of colour reads as an
+            // error banner even when it is green.
+            .background(
+                Brush.linearGradient(
+                    listOf(tint.copy(alpha = 0.16f), tint.copy(alpha = 0.05f)),
+                ),
+            )
+            .border(1.dp, tint.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+            .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(12.dp).clip(CircleShape).background(tint),
+                Modifier.size(14.dp).clip(CircleShape).background(tint),
             )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(11.dp))
             Text(
                 health.headline,
                 color = Theme.primary,
-                fontSize = 19.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
             )
         }
@@ -96,44 +205,52 @@ fun HealthCard(health: HostHealth, name: String, modifier: Modifier = Modifier) 
 }
 
 @Composable
-fun SimpleTileCard(tile: SimpleTile, modifier: Modifier = Modifier) {
+fun SimpleTileCard(tile: SimpleTile, ring: Dp = 104.dp, modifier: Modifier = Modifier) {
     Column(
         modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(Theme.panel)
-            .border(1.dp, Theme.border, RoundedCornerShape(12.dp))
-            .padding(13.dp),
+            .clip(RoundedCornerShape(16.dp))
+            .background(Theme.card)
+            .border(1.dp, Theme.border, RoundedCornerShape(16.dp))
+            .padding(if (ring > 90.dp) 14.dp else 11.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(tile.name, color = Theme.secondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            tile.valueText,
-            color = Theme.primary,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Monospace,
-        )
-        tile.fraction?.let { fraction ->
-            Spacer(Modifier.height(8.dp))
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Theme.track),
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(fraction.toFloat().coerceIn(0f, 1f))
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Theme.health(tile.level)),
-                )
-            }
+        Row(Modifier.fillMaxWidth()) {
+            Text(
+                tile.name,
+                color = Theme.secondary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+            )
         }
-        if (tile.summary.isNotEmpty()) {
-            Spacer(Modifier.height(7.dp))
-            Text(tile.summary, color = Theme.tertiary, fontSize = 11.sp)
+        Spacer(Modifier.height(11.dp))
+
+        RingGauge(
+            fraction = tile.fraction,
+            color = Theme.health(tile.level),
+            label = tile.valueText,
+            diameter = ring,
+        )
+
+        Spacer(Modifier.height(11.dp))
+        // Two lines reserved so all three cards end at the same height whether the summary is
+        // "Barely working" or "240.9 GiB free of 254.2 GiB".
+        Text(
+            tile.summary,
+            color = Theme.tertiary,
+            fontSize = if (ring > 90.dp) 11.5.sp else 10.sp,
+            textAlign = TextAlign.Center,
+            minLines = 2,
+            maxLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        if (tile.history.size > 1) {
+            Spacer(Modifier.height(9.dp))
+            Sparkline(
+                values = tile.history,
+                color = Theme.health(tile.level),
+                modifier = Modifier.fillMaxWidth().height(22.dp),
+            )
         }
     }
 }
@@ -165,17 +282,18 @@ fun SimpleHostScreen(host: Host, model: CoreModel, modifier: Modifier = Modifier
             }
         } else {
             item {
-                // Adaptive: two columns on a folded phone, more once it opens.
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 152.dp),
-                    modifier = Modifier.fillMaxWidth().height(
-                        if (snapshot.simpleTiles.size > 2) 260.dp else 140.dp,
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(snapshot.simpleTiles.size) { index ->
-                        SimpleTileCard(snapshot.simpleTiles[index])
+                // Always one row of three, with the ring sized to the width available. A wrapping
+                // grid put two tiles on the first row and left a hole beside the third.
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val wide = maxWidth > 520.dp
+                    Row(horizontalArrangement = Arrangement.spacedBy(if (wide) 12.dp else 9.dp)) {
+                        snapshot.simpleTiles.forEach { tile ->
+                            SimpleTileCard(
+                                tile = tile,
+                                ring = if (wide) 104.dp else 78.dp,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
             }

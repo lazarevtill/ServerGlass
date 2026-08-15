@@ -1281,13 +1281,21 @@ public struct SimpleTile: Equatable, Hashable {
      */
     public var summary: String
     /**
-     * 0-1 for the ring, absent for things with no proportion (uptime).
+     * 0-1 for the ring, absent for things with no proportion.
      */
     public var fraction: Double?
     /**
      * `ok`, `busy`, `problem` — drives colour without the UI re-deriving thresholds.
      */
     public var level: String
+    /**
+     * Recent values, oldest first.
+     *
+     * The simple view used to be the only screen without any trend, which had it backwards: a
+     * number with no history cannot answer "is this getting worse", which is the question someone
+     * glancing at a dashboard is actually asking.
+     */
+    public var history: [Double]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1302,17 +1310,25 @@ public struct SimpleTile: Equatable, Hashable {
          * A sentence: "142.3 GiB free of 150.0 GiB", "Barely working".
          */summary: String, 
         /**
-         * 0-1 for the ring, absent for things with no proportion (uptime).
+         * 0-1 for the ring, absent for things with no proportion.
          */fraction: Double?, 
         /**
          * `ok`, `busy`, `problem` — drives colour without the UI re-deriving thresholds.
-         */level: String) {
+         */level: String, 
+        /**
+         * Recent values, oldest first.
+         *
+         * The simple view used to be the only screen without any trend, which had it backwards: a
+         * number with no history cannot answer "is this getting worse", which is the question someone
+         * glancing at a dashboard is actually asking.
+         */history: [Double]) {
         self.metric = metric
         self.name = name
         self.valueText = valueText
         self.summary = summary
         self.fraction = fraction
         self.level = level
+        self.history = history
     }
 
     
@@ -1336,7 +1352,8 @@ public struct FfiConverterTypeSimpleTile: FfiConverterRustBuffer {
                 valueText: FfiConverterString.read(from: &buf), 
                 summary: FfiConverterString.read(from: &buf), 
                 fraction: FfiConverterOptionDouble.read(from: &buf), 
-                level: FfiConverterString.read(from: &buf)
+                level: FfiConverterString.read(from: &buf), 
+                history: FfiConverterSequenceDouble.read(from: &buf)
         )
     }
 
@@ -1347,6 +1364,7 @@ public struct FfiConverterTypeSimpleTile: FfiConverterRustBuffer {
         FfiConverterString.write(value.summary, into: &buf)
         FfiConverterOptionDouble.write(value.fraction, into: &buf)
         FfiConverterString.write(value.level, into: &buf)
+        FfiConverterSequenceDouble.write(value.history, into: &buf)
     }
 }
 
@@ -1750,9 +1768,9 @@ enum SgError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
     
     case UnknownTarget(id: String
     )
-    case Connection(message: String, recoverable: Bool
+    case Connection(detail: String, recoverable: Bool
     )
-    case Internal(message: String
+    case Internal(detail: String
     )
 
     
@@ -1787,11 +1805,11 @@ public struct FfiConverterTypeSgError: FfiConverterRustBuffer {
             id: try FfiConverterString.read(from: &buf)
             )
         case 2: return .Connection(
-            message: try FfiConverterString.read(from: &buf), 
+            detail: try FfiConverterString.read(from: &buf), 
             recoverable: try FfiConverterBool.read(from: &buf)
             )
         case 3: return .Internal(
-            message: try FfiConverterString.read(from: &buf)
+            detail: try FfiConverterString.read(from: &buf)
             )
 
          default: throw UniffiInternalError.unexpectedEnumCase
@@ -1810,15 +1828,15 @@ public struct FfiConverterTypeSgError: FfiConverterRustBuffer {
             FfiConverterString.write(id, into: &buf)
             
         
-        case let .Connection(message,recoverable):
+        case let .Connection(detail,recoverable):
             writeInt(&buf, Int32(2))
-            FfiConverterString.write(message, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
             FfiConverterBool.write(recoverable, into: &buf)
             
         
-        case let .Internal(message):
+        case let .Internal(detail):
             writeInt(&buf, Int32(3))
-            FfiConverterString.write(message, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
             
         }
     }

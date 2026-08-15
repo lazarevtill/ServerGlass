@@ -100,10 +100,16 @@ pub struct SimpleTile {
     pub value_text: String,
     /// A sentence: "142.3 GiB free of 150.0 GiB", "Barely working".
     pub summary: String,
-    /// 0-1 for the ring, absent for things with no proportion (uptime).
+    /// 0-1 for the ring, absent for things with no proportion.
     pub fraction: Option<f64>,
     /// `ok`, `busy`, `problem` — drives colour without the UI re-deriving thresholds.
     pub level: String,
+    /// Recent values, oldest first.
+    ///
+    /// The simple view used to be the only screen without any trend, which had it backwards: a
+    /// number with no history cannot answer "is this getting worse", which is the question someone
+    /// glancing at a dashboard is actually asking.
+    pub history: Vec<f64>,
 }
 
 /// One row of the process table.
@@ -526,7 +532,10 @@ pub fn simple_tiles(
     all: &[MetricGauge],
     entities: &[EntityView],
 ) -> Vec<SimpleTile> {
-    const ORDER: [&str; 4] = ["cpu_usage", "mem_usage", "disk_usage", "uptime"];
+    // Three, not four. Uptime was the fourth, but the health card's own sentence already reads
+    // "Running for 12h 36m" — the tile repeated it, carried no ring because it has no proportion,
+    // and unbalanced the grid. Saying a thing once and saying it well beats saying it twice.
+    const ORDER: [&str; 3] = ["cpu_usage", "mem_usage", "disk_usage"];
 
     let find = |metric: &str| headline.iter().find(|g| g.metric == metric);
     // Sizes live in the detail groups, not the headline set, so the lookup has to span both. A
@@ -561,11 +570,7 @@ pub fn simple_tiles(
                 _ => (None, None),
             };
 
-            let value_text = if *metric == "uptime" {
-                crate::format_uptime(gauge.value)
-            } else {
-                format_value(gauge.value, &gauge.unit_suffix, gauge.binary_scaled)
-            };
+            let value_text = format_value(gauge.value, &gauge.unit_suffix, gauge.binary_scaled);
 
             let level = match gauge.fraction_percent() {
                 Some(p) if p >= 90.0 => "problem",
@@ -580,6 +585,7 @@ pub fn simple_tiles(
                 summary: crate::plain::plain_summary(gauge, used, total),
                 fraction: gauge.display_fraction(),
                 level: level.to_string(),
+                history: gauge.history.clone(),
             })
         })
         .collect()

@@ -18,6 +18,9 @@ import SwiftUI
 enum Theme {
     static let background = Color(red: 0.043, green: 0.043, blue: 0.051)
     static let panel = Color(red: 0.082, green: 0.082, blue: 0.094)
+    /// Slightly lifted from `panel`, for the simple view's larger cards. A single flat surface
+    /// colour across every size makes big cards look like empty space.
+    static let card = Color(red: 0.098, green: 0.098, blue: 0.114)
     static let panelBorder = Color.white.opacity(0.06)
     static let inset = Color.black.opacity(0.25)
     static let track = Color.white.opacity(0.08)
