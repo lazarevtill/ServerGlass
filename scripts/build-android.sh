@@ -23,10 +23,17 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
 RUN=${1:-}
 APP=apps/android/app
 ABI=arm64-v8a
+# SG_PROFILE=release strips symbols and optimises. It is the difference between a 75 MB APK and a
+# shippable one, so scripts/release.sh always sets it.
+PROFILE=${SG_PROFILE:-debug}
 
-echo "==> cross-compiling sg-ffi for $ABI"
+echo "==> cross-compiling sg-ffi for $ABI ($PROFILE)"
 # minSdk 26 must match app/build.gradle.kts: the NDK links against that API level's libc.
-cargo ndk -t "$ABI" -P 26 -o "$APP/src/main/jniLibs" build -p sg-ffi
+if [[ $PROFILE == release ]]; then
+    cargo ndk -t "$ABI" -P 26 -o "$APP/src/main/jniLibs" build --release -p sg-ffi
+else
+    cargo ndk -t "$ABI" -P 26 -o "$APP/src/main/jniLibs" build -p sg-ffi
+fi
 
 echo "==> generating Kotlin bindings"
 # Generated from the host dylib: uniffi reads architecture-independent metadata, and there is no

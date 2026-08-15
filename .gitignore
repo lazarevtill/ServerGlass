@@ -24,3 +24,8 @@ apps/android/build/
 apps/android/app/build/
 apps/android/local.properties
 apps/android/app/src/main/jniLibs/
+
+# Release artefacts and the local Android signing key. The key identifies this build machine and
+# must never be committed; scripts/release.sh regenerates it if absent.
+/dist/
+/release/

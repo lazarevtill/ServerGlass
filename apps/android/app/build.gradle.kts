@@ -16,9 +16,25 @@ android {
         versionName = "0.1.0"
     }
 
+    // Android will not install an unsigned APK at all — unlike macOS, there is no unsigned
+    // option. `scripts/release.sh` generates a local, gitignored key on first run; without it the
+    // release build still succeeds and produces an unsigned APK for the script to sign itself.
+    val keystorePath = System.getenv("SG_KEYSTORE")
+    signingConfigs {
+        if (keystorePath != null && file(keystorePath).exists()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("SG_KEYSTORE_PASSWORD") ?: "serverglass"
+                keyAlias = System.getenv("SG_KEY_ALIAS") ?: "serverglass"
+                keyPassword = System.getenv("SG_KEY_PASSWORD") ?: "serverglass"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
