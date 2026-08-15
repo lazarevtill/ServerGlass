@@ -36,6 +36,15 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
     private val core = ServerGlass()
     private val store = HostStore(application)
 
+    /**
+     * Where trusted host keys are recorded.
+     *
+     * An Android app has no `HOME` in its environment and no `~/.ssh`, so the transport's default
+     * wrote nothing: "remember this server's identity" remembered nothing, and every later
+     * connection would have accepted a substituted key. The app knows its own writable directory.
+     */
+    private val knownHosts = java.io.File(application.filesDir, "ssh/known_hosts").absolutePath
+
     var hosts by mutableStateOf<List<Host>>(emptyList())
         private set
     var selection by mutableStateOf<String?>(null)
@@ -86,6 +95,7 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
                 store.secret(saved.id)
             },
             hostKeyPolicy = saved.hostKeyPolicy,
+            knownHostsPath = knownHosts,
             refreshMs = saved.refreshMs,
         )
 

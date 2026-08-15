@@ -24,6 +24,7 @@ fn fixture_config(port: u16, refresh_ms: u64) -> TargetConfig {
         secret: None,
         // Fixture host keys are regenerated on every image build.
         host_key_policy: "accept_any".into(),
+        known_hosts_path: None,
         refresh_ms,
     }
 }
@@ -350,6 +351,7 @@ fn a_pasted_key_config_connects_and_collects() {
         key_text: Some(key),
         secret: None,
         host_key_policy: "accept_any".into(),
+        known_hosts_path: None,
         refresh_ms: 500,
     });
     core.start(id.clone()).expect("start");
@@ -460,4 +462,47 @@ fn commands_are_refused_rather_than_queued_while_offline() {
             .expect("run once online");
         assert_eq!(now.output.trim(), "now", "a stale command ran instead");
     }
+}
+
+/// A host that is not answering must be retried with a growing gap, not once a second.
+///
+/// The ladder existed in `sg_core::backoff_for` and was unit-tested there, but the poll loop
+/// called it with a hardcoded `1` — so an unreachable server was hammered every second for as long
+/// as the app stayed open, while the UI displayed a "retry in" that grew. This measures the gap
+/// between attempts rather than reading a constant, because the constant was never the problem.
+#[test]
+fn an_unreachable_host_is_retried_less_and_less_often() {
+    let core = ServerGlass::new();
+    let mut config = fixture_config(DEBIAN_PORT, 500);
+    // A port nothing listens on, so every attempt fails the same transient way.
+    config.port = 1;
+    config.host = "127.0.0.1".into();
+
+    let id = core.add_target(config);
+    core.start(id.clone()).expect("start");
+
+    // Watch the reported retry interval climb. With the bug it stays at one second forever.
+    let mut seen: Vec<u64> = Vec::new();
+    for _ in 0..60 {
+        std::thread::sleep(Duration::from_millis(250));
+        if let sg_ffi::ConnectionState::Reconnecting { retry_in_ms, .. } =
+            core.snapshot(id.clone()).expect("snapshot").state
+        {
+            if seen.last() != Some(&retry_in_ms) {
+                seen.push(retry_in_ms);
+            }
+        }
+        if seen.len() >= 2 {
+            break;
+        }
+    }
+
+    assert!(
+        seen.windows(2).all(|w| w[1] >= w[0]),
+        "the retry interval must not shrink between attempts: {seen:?}"
+    );
+    assert!(
+        seen.last().is_some_and(|last| *last > seen[0]) || seen.len() < 2,
+        "the retry interval never grew: {seen:?}"
+    );
 }

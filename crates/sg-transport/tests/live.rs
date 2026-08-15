@@ -335,3 +335,47 @@ async fn a_pasted_key_survives_the_whitespace_pasting_adds() {
 
     assert!(SshSession::connect(spec).await.is_ok());
 }
+
+/// "Trust this server" has to write the key down, or every connection is a first connection.
+///
+/// On Android and iOS it did not: `learn_known_hosts` writes to `~/.ssh/known_hosts` and does not
+/// create `~/.ssh`, which does not exist in an app sandbox — and the failure was discarded. The
+/// apps promised to remember a host's identity, recorded nothing, and would then have accepted a
+/// substituted key on every later connection.
+#[tokio::test]
+async fn trusting_a_host_on_first_use_actually_records_its_key() {
+    if !fixture_up(DEBIAN_PORT).await {
+        return;
+    }
+    // A private HOME, so this neither reads nor writes the developer's own known_hosts.
+    let home = std::env::temp_dir().join(format!("sg-known-hosts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).expect("temp home");
+    // SAFETY: single-threaded test process; russh reads HOME when it resolves known_hosts.
+    unsafe { std::env::set_var("HOME", &home) };
+
+    let spec = ConnectionSpec::new("127.0.0.1", "root")
+        .port(DEBIAN_PORT)
+        .auth(Auth::KeyFile {
+            path: fixture_key(),
+            passphrase: None,
+        })
+        .host_key_policy(HostKeyPolicy::AcceptNew);
+
+    let session = SshSession::connect(spec).await.expect("connect");
+    drop(session);
+
+    let recorded = home.join(".ssh").join("known_hosts");
+    assert!(
+        recorded.exists(),
+        "the host key was not written to {}",
+        recorded.display()
+    );
+    let body = std::fs::read_to_string(&recorded).expect("read known_hosts");
+    assert!(
+        body.contains("127.0.0.1") || body.contains("[127.0.0.1]"),
+        "known_hosts does not mention the host: {body}"
+    );
+
+    let _ = std::fs::remove_dir_all(&home);
+}

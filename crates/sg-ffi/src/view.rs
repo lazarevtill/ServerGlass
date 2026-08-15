@@ -27,6 +27,12 @@ pub struct TargetConfig {
     pub secret: Option<String>,
     /// `"strict"`, `"accept_new"` or `"accept_any"`.
     pub host_key_policy: String,
+    /// Where to record trusted host keys. Empty means `~/.ssh/known_hosts`.
+    ///
+    /// A phone has no `~/.ssh` and no `HOME` in the app's environment, so "remember this server's
+    /// identity" wrote nothing and every later connection was another first connection. Each app
+    /// passes its own writable directory; the core does not guess.
+    pub known_hosts_path: Option<String>,
     pub refresh_ms: u64,
 }
 
@@ -575,10 +581,14 @@ pub fn connection_spec(config: &TargetConfig) -> sg_transport::ConnectionSpec {
         _ => HostKeyPolicy::Strict,
     };
 
-    sg_transport::ConnectionSpec::new(&config.host, &config.user)
+    let mut spec = sg_transport::ConnectionSpec::new(&config.host, &config.user)
         .port(if config.port == 0 { 22 } else { config.port })
         .auth(auth)
-        .host_key_policy(policy)
+        .host_key_policy(policy);
+    if let Some(path) = config.known_hosts_path.as_deref().filter(|p| !p.is_empty()) {
+        spec = spec.known_hosts(path);
+    }
+    spec
 }
 
 /// The unit a suffix came from, for tests.
@@ -972,6 +982,7 @@ mod tests {
             key_text: None,
             secret: None,
             host_key_policy: "nonsense".into(),
+            known_hosts_path: None,
             refresh_ms: 1000,
         };
         let spec = connection_spec(&config);
@@ -1000,6 +1011,7 @@ mod tests {
             key_text: None,
             secret: Some(String::new()),
             host_key_policy: "accept_new".into(),
+            known_hosts_path: None,
             refresh_ms: 1000,
         };
         let spec = connection_spec(&config);

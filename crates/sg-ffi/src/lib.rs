@@ -293,6 +293,13 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
     };
 
     let interval = std::time::Duration::from_millis(target.config.refresh_ms.clamp(250, 60_000));
+    // Consecutive failed attempts, so the wait between them grows. `backoff_for` was being called
+    // with a hardcoded 1 at both sites below, which meant a server that was switched off got a
+    // fresh connection attempt every second, for as long as the app stayed open: a battery and
+    // data drain on a phone, and exactly the pattern fail2ban exists to ban. Worse, the runtime
+    // was already *reporting* a growing "retry in" to the UI, so the number on screen and the
+    // behaviour disagreed.
+    let mut attempt: u32 = 0;
 
     loop {
         publish(ConnectionState::Connecting);
@@ -314,9 +321,12 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
                 // the host is how accounts get locked out.
                 return;
             }
-            tokio::time::sleep(sg_core::backoff_for(1)).await;
+            attempt = attempt.saturating_add(1);
+            tokio::time::sleep(sg_core::backoff_for(attempt)).await;
             continue;
         }
+        // Connected. The next disconnection starts the ladder again from the bottom.
+        attempt = 0;
 
         // The first tick after connecting carries no counter-derived series: a rate needs two
         // readings. Publishing it would render a status grid without its CPU and network tiles,
@@ -402,7 +412,8 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
         {
             return;
         }
-        tokio::time::sleep(sg_core::backoff_for(1)).await;
+        attempt = attempt.saturating_add(1);
+        tokio::time::sleep(sg_core::backoff_for(attempt)).await;
     }
 }
 
@@ -473,6 +484,7 @@ mod tests {
             key_text: None,
             secret: None,
             host_key_policy: "strict".into(),
+            known_hosts_path: None,
             refresh_ms: 1000,
         }
     }

@@ -42,6 +42,15 @@ impl Auth {
     }
 }
 
+/// Where the record of trusted host keys lives.
+///
+/// A path rather than "wherever `~/.ssh` is", because on a phone there is no `~/.ssh` and no
+/// `HOME` in the app's environment. The apps offered "remember its identity the first time you
+/// connect", the write failed, and every later connection was another first connection — which
+/// would have accepted a substituted key. The platform knows its own writable directory; the core
+/// should be told, not guess.
+pub type KnownHostsPath = Option<std::path::PathBuf>;
+
 /// Host key verification policy.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HostKeyPolicy {
@@ -72,6 +81,9 @@ pub struct ConnectionSpec {
     /// Idle interval after which a keepalive is sent. This is what stops a NAT or a bastion from
     /// silently dropping an idle monitoring session.
     pub keepalive_secs: u64,
+    /// Where trusted host keys are recorded. `None` means `~/.ssh/known_hosts`, which is right on
+    /// a desktop and wrong in an app sandbox — see [`KnownHostsPath`].
+    pub known_hosts: KnownHostsPath,
 }
 
 impl ConnectionSpec {
@@ -85,6 +97,7 @@ impl ConnectionSpec {
             connect_timeout_ms: 15_000,
             batch_timeout_ms: 10_000,
             keepalive_secs: 30,
+            known_hosts: None,
         }
     }
 
@@ -95,6 +108,12 @@ impl ConnectionSpec {
 
     pub fn auth(mut self, auth: Auth) -> Self {
         self.auth = auth;
+        self
+    }
+
+    /// Record trusted host keys here instead of `~/.ssh/known_hosts`.
+    pub fn known_hosts(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.known_hosts = Some(path.into());
         self
     }
 

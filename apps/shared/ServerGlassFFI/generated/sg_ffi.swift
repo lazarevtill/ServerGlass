@@ -1587,6 +1587,14 @@ public struct TargetConfig: Equatable, Hashable {
      * `"strict"`, `"accept_new"` or `"accept_any"`.
      */
     public var hostKeyPolicy: String
+    /**
+     * Where to record trusted host keys. Empty means `~/.ssh/known_hosts`.
+     *
+     * A phone has no `~/.ssh` and no `HOME` in the app's environment, so "remember this server's
+     * identity" wrote nothing and every later connection was another first connection. Each app
+     * passes its own writable directory; the core does not guess.
+     */
+    public var knownHostsPath: String?
     public var refreshMs: UInt64
 
     // Default memberwise initializers are never public by default, so we
@@ -1610,7 +1618,14 @@ public struct TargetConfig: Equatable, Hashable {
          */secret: String?, 
         /**
          * `"strict"`, `"accept_new"` or `"accept_any"`.
-         */hostKeyPolicy: String, refreshMs: UInt64) {
+         */hostKeyPolicy: String, 
+        /**
+         * Where to record trusted host keys. Empty means `~/.ssh/known_hosts`.
+         *
+         * A phone has no `~/.ssh` and no `HOME` in the app's environment, so "remember this server's
+         * identity" wrote nothing and every later connection was another first connection. Each app
+         * passes its own writable directory; the core does not guess.
+         */knownHostsPath: String?, refreshMs: UInt64) {
         self.host = host
         self.port = port
         self.user = user
@@ -1619,6 +1634,7 @@ public struct TargetConfig: Equatable, Hashable {
         self.keyText = keyText
         self.secret = secret
         self.hostKeyPolicy = hostKeyPolicy
+        self.knownHostsPath = knownHostsPath
         self.refreshMs = refreshMs
     }
 
@@ -1646,6 +1662,7 @@ public struct FfiConverterTypeTargetConfig: FfiConverterRustBuffer {
                 keyText: FfiConverterOptionString.read(from: &buf), 
                 secret: FfiConverterOptionString.read(from: &buf), 
                 hostKeyPolicy: FfiConverterString.read(from: &buf), 
+                knownHostsPath: FfiConverterOptionString.read(from: &buf), 
                 refreshMs: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -1659,6 +1676,7 @@ public struct FfiConverterTypeTargetConfig: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.keyText, into: &buf)
         FfiConverterOptionString.write(value.secret, into: &buf)
         FfiConverterString.write(value.hostKeyPolicy, into: &buf)
+        FfiConverterOptionString.write(value.knownHostsPath, into: &buf)
         FfiConverterUInt64.write(value.refreshMs, into: &buf)
     }
 }

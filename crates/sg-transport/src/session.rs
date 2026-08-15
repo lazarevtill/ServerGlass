@@ -24,14 +24,24 @@ use crate::frame::Framing;
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum HostKeyVerdict {
     Accepted,
-    Unknown { fingerprint: String },
-    Changed { fingerprint: String },
+    /// Trusted as asked, but the key could not be written down — so the next connection has
+    /// nothing to compare against and would trust a different key just as readily.
+    AcceptedUnrecorded {
+        detail: String,
+    },
+    Unknown {
+        fingerprint: String,
+    },
+    Changed {
+        fingerprint: String,
+    },
 }
 
 struct ClientHandler {
     host: String,
     port: u16,
     policy: HostKeyPolicy,
+    known_hosts: crate::auth::KnownHostsPath,
     verdict: Arc<Mutex<Option<HostKeyVerdict>>>,
 }
 
@@ -51,7 +61,12 @@ impl client::Handler for ClientHandler {
             return Ok(true);
         }
 
-        let known = russh::keys::check_known_hosts(&self.host, self.port, server_public_key);
+        let known = match &self.known_hosts {
+            Some(path) => {
+                russh::keys::check_known_hosts_path(&self.host, self.port, server_public_key, path)
+            }
+            None => russh::keys::check_known_hosts(&self.host, self.port, server_public_key),
+        };
         let verdict = match known {
             Ok(true) => HostKeyVerdict::Accepted,
             // A key recorded for this host that does not match the one presented. Never
@@ -59,11 +74,21 @@ impl client::Handler for ClientHandler {
             Err(russh::keys::Error::KeyChanged { .. }) => HostKeyVerdict::Changed { fingerprint },
             Ok(false) | Err(_) => {
                 if self.policy == HostKeyPolicy::AcceptNew {
-                    let _ = russh::keys::known_hosts::learn_known_hosts(
+                    if let Err(error) = learn(
                         &self.host,
                         self.port,
                         server_public_key,
-                    );
+                        self.known_hosts.as_deref(),
+                    ) {
+                        // Accept anyway — the user asked to trust this host — but say that the
+                        // key was not recorded, because "trusted on first use" with nothing
+                        // written down means *every* connection is a first use, and the next one
+                        // would accept a different key just as readily.
+                        self.record(HostKeyVerdict::AcceptedUnrecorded {
+                            detail: error.to_string(),
+                        });
+                        return Ok(true);
+                    }
                     HostKeyVerdict::Accepted
                 } else {
                     HostKeyVerdict::Unknown { fingerprint }
@@ -75,6 +100,45 @@ impl client::Handler for ClientHandler {
         self.record(verdict);
         Ok(accepted)
     }
+}
+
+/// Record a host key, creating the directory it lives in.
+///
+/// `learn_known_hosts` writes to `~/.ssh/known_hosts` and does not create `~/.ssh`. On a desktop
+/// that directory is always there; in an app sandbox it is not, so on Android and iOS the write
+/// failed every time — and the failure was discarded. The apps offered "remember its identity the
+/// first time you connect", recorded nothing, and then accepted whatever key was presented on
+/// every subsequent connection, which is the exact attack host-key checking exists to stop.
+fn learn(
+    host: &str,
+    port: u16,
+    key: &russh::keys::PublicKey,
+    known_hosts: Option<&std::path::Path>,
+) -> std::result::Result<(), std::io::Error> {
+    let directory = match known_hosts {
+        Some(path) => path.parent().map(std::path::Path::to_path_buf),
+        // Nothing configured: the desktop case, where `~/.ssh` is what russh will use.
+        None => std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".ssh")),
+    };
+
+    if let Some(directory) = directory {
+        // `learn_known_hosts` writes the file but will not create the directory holding it, which
+        // is why this failed in an app sandbox where nothing had made one.
+        std::fs::create_dir_all(&directory)?;
+        // 0700: a known_hosts file is not secret, but the directory it shares with private keys
+        // should not be readable by anything else on a multi-user box.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+
+    match known_hosts {
+        Some(path) => russh::keys::known_hosts::learn_known_hosts_path(host, port, key, path),
+        None => russh::keys::known_hosts::learn_known_hosts(host, port, key),
+    }
+    .map_err(|e| std::io::Error::other(e.to_string()))
 }
 
 impl ClientHandler {
@@ -99,6 +163,7 @@ impl SshSession {
     pub async fn connect(spec: ConnectionSpec) -> Result<Self> {
         let verdict = Arc::new(Mutex::new(None));
         let handler = ClientHandler {
+            known_hosts: spec.known_hosts.clone(),
             host: spec.host.clone(),
             port: spec.port,
             policy: spec.host_key_policy,

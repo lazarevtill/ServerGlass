@@ -62,6 +62,21 @@ public enum HostStore {
     ///
     /// The secret is fetched per connection rather than held alongside the rest of the host, so it
     /// exists in memory for as short a time as the language allows.
+    /// Where trusted host keys are recorded.
+    ///
+    /// iOS has no `~/.ssh` and no `HOME` pointing anywhere writable by the app, so the transport's
+    /// default recorded nothing — and a host trusted on first use would have had a substituted key
+    /// accepted on every connection after. Application Support rather than Caches: the system may
+    /// purge Caches, and losing this file silently downgrades the app's security.
+    static var knownHostsPath: String {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let directory = base.appendingPathComponent("ServerGlass", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("known_hosts").path
+    }
+
     public static func config(for host: SavedHost) -> TargetConfig {
         TargetConfig(
             host: host.address,
@@ -75,6 +90,7 @@ public enum HostStore {
             keyText: Keychain.secret(for: host.id, kind: .keyText),
             secret: Keychain.secret(for: host.id),
             hostKeyPolicy: host.hostKeyPolicy,
+            knownHostsPath: knownHostsPath,
             refreshMs: host.refreshMs
         )
     }
