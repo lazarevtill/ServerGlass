@@ -30,6 +30,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
@@ -185,8 +195,7 @@ private fun OverviewPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> Str
     Panel("Overview") {
         // A grid rather than a row: six rings do not fit across a phone, and the same view has to
         // work unfolded without a second layout existing.
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val columns = (maxWidth / 108.dp).toInt().coerceIn(2, 6)
+        run {
             // The same readings the Apple overview shows, in the same order.
             val tiles = buildList {
                 snapshot.gauge("cpu_usage")?.let {
@@ -218,58 +227,35 @@ private fun OverviewPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> Str
                 snapshot.gauge("uptime")?.let { add(Overview(it, format(it), null, ring = false)) }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                tiles.chunked(columns).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { tile ->
-                            Column(
-                                Modifier.weight(1f),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                if (tile.ring) {
-                                    RingGauge(
-                                        fraction = tile.gauge.fraction(),
-                                        color = tile.gauge.severity(),
-                                        label = tile.caption,
-                                        diameter = 74.dp,
-                                    )
-                                } else {
-                                    // Uptime has no maximum, so it gets a number rather than a
-                                    // ring: a ring implies a proportion of something.
-                                    Box(
-                                        Modifier.size(74.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            tile.caption,
-                                            color = Theme.primary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontFamily = FontFamily.Monospace,
-                                            textAlign = TextAlign.Center,
-                                        )
-                                    }
-                                }
-                                Spacer(Modifier.height(6.dp))
-                                Text(
-                                    tile.gauge.label,
-                                    color = Theme.primary,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                )
-                                tile.detail?.let {
-                                    Text(
-                                        it,
-                                        color = Theme.tertiary,
-                                        fontSize = 10.sp,
-                                        maxLines = 1,
-                                        textAlign = TextAlign.Center,
-                                    )
-                                }
-                            }
+            AdaptiveGrid(minimum = 92.dp, horizontalSpacing = 4.dp, verticalSpacing = 12.dp, count = tiles.size) { index ->
+                val tile = tiles[index]
+                if (tile.ring) {
+                    HeadlineRing(tile.gauge, tile.caption, tile.detail)
+                } else {
+                    // Uptime has no maximum, so it gets a number rather than a ring: a ring
+                    // implies a proportion of something. The Apple overview does the same.
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                tile.caption,
+                                color = Theme.primary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.Monospace,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                            )
                         }
-                        // Keeps a short last row aligned with the one above instead of centred.
-                        repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                        Text(
+                            tile.gauge.label,
+                            color = Theme.primary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
             }
@@ -316,38 +302,19 @@ private fun CpuPanel(
                 ),
             )
 
-            if (cores.isNotEmpty()) {
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val columns = (maxWidth / 130.dp).toInt().coerceAtLeast(1)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        cores.chunked(columns).forEach { row ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                row.forEach { core ->
-                                    Box(Modifier.weight(1f)) {
-                                        CoreBar(
-                                            core.display,
-                                            core.gauge("usage"),
-                                            "%.0f%%".format(core.value("usage")),
-                                        )
-                                    }
-                                }
-                                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
-                            }
-                        }
-                    }
-                }
+            AdaptiveGrid(
+                minimum = 108.dp,
+                horizontalSpacing = 10.dp,
+                verticalSpacing = 6.dp,
+                count = cores.size,
+            ) { index ->
+                CoreBar(cores[index].display, cores[index].value("usage"))
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 listOf("procs_running", "procs_blocked", "ctx_switches").forEach { metric ->
                     snapshot.gauge(metric)?.let {
-                        StatCell(
-                            it.label,
-                            format(it),
-                            Theme.primary,
-                            it.history,
-                            Modifier.weight(1f),
-                        )
+                        StatCell(it.label, format(it), Theme.primary, it.history, Modifier.weight(1f))
                     }
                 }
             }
@@ -364,64 +331,19 @@ private fun MemoryPanel(
     Panel("Memory", modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             snapshot.gauge("mem_usage")?.let {
-                CapacityRow("Physical", it, snapshot.pair("mem_used", "mem_total", format))
+                CapacityRow("Physical", it, snapshot.pair("mem_used", "mem_total", format), format(it))
             }
             snapshot.gauge("swap_usage")?.let {
-                CapacityRow("Swap", it, snapshot.pair("swap_used", "swap_total", format))
+                CapacityRow("Swap", it, snapshot.pair("swap_used", "swap_total", format), format(it))
             }
 
             // The breakdown is deliberately a plain list of quantities: on a host running ZFS
             // these do not sum to the total (ARC is neither free nor counted as cached), so
             // rendering them as a stacked bar would draw a picture that is simply untrue.
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                listOf("mem_available", "mem_free", "mem_cached", "mem_buffers").forEach { metric ->
-                    snapshot.gauge(metric)?.let { KeyValueRow(it.label, format(it)) }
-                }
-            }
-        }
-    }
-}
-
-/** One slice of the CPU stacked bar. */
-private data class Segment(val label: String, val percent: Double, val color: Color)
-
-/**
- * How the processor's time splits, as one bar.
- *
- * The same widget the Apple apps use: four numbers that add up belong in one bar, not in four
- * rows a reader has to add up themselves.
- */
-@Composable
-private fun StackedBar(segments: List<Segment>) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Theme.track),
-        ) {
-            segments.forEach { segment ->
-                val share = (segment.percent / 100.0).coerceIn(0.0, 1.0).toFloat()
-                if (share > 0f) {
-                    Box(Modifier.fillMaxHeight().weight(share).background(segment.color))
-                }
-            }
-            val used = segments.sumOf { it.percent }.coerceIn(0.0, 100.0).toFloat() / 100f
-            if (used < 1f) Box(Modifier.fillMaxHeight().weight(1f - used))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            segments.forEach { segment ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(5.dp).clip(CircleShape).background(segment.color))
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "${segment.label} ${"%.1f".format(segment.percent)}%",
-                        color = Theme.tertiary,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                    )
-                }
+            val breakdown = listOf("mem_available", "mem_free", "mem_cached", "mem_buffers")
+                .mapNotNull { snapshot.gauge(it) }
+            AdaptiveGrid(minimum = 118.dp, horizontalSpacing = 12.dp, verticalSpacing = 5.dp, count = breakdown.size) {
+                KeyValueRow(breakdown[it].label, format(breakdown[it]))
             }
         }
     }
@@ -441,19 +363,21 @@ private fun NetworkPanel(
 
     Panel("Network", subtitle = shown(interfaces.size, cap = 6), modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 snapshot.gauge("net_rx")?.let {
-                    StatCell("Download", format(it), Theme.good, it.history, Modifier.weight(1f))
+                    StatCell("Download", format(it), Theme.good, it.history, Modifier.weight(1f), Icons.Filled.ArrowDownward)
                 }
                 snapshot.gauge("net_tx")?.let {
-                    StatCell("Upload", format(it), Theme.info, it.history, Modifier.weight(1f))
+                    StatCell("Upload", format(it), Theme.info, it.history, Modifier.weight(1f), Icons.Filled.ArrowUpward)
                 }
             }
             interfaces.take(6).forEach { device ->
                 ThroughputRow(
                     name = device.display,
-                    down = device.gauge("rx_bytes")?.let(format),
-                    up = device.gauge("tx_bytes")?.let(format),
+                    incoming = device.gauge("rx_bytes"),
+                    outgoing = device.gauge("tx_bytes"),
+                    outgoingColor = Theme.info,
+                    format = format,
                 )
             }
         }
@@ -471,19 +395,21 @@ private fun DiskPanel(
 
     Panel("Disk I/O", subtitle = shown(disks.size, cap = 6), modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 snapshot.gauge("disk_read")?.let {
-                    StatCell("Read", format(it), Theme.good, it.history, Modifier.weight(1f))
+                    StatCell("Read", format(it), Theme.good, it.history, Modifier.weight(1f), Icons.Filled.ArrowDownward)
                 }
                 snapshot.gauge("disk_write")?.let {
-                    StatCell("Write", format(it), Theme.warn, it.history, Modifier.weight(1f))
+                    StatCell("Write", format(it), Theme.warn, it.history, Modifier.weight(1f), Icons.Filled.ArrowUpward)
                 }
             }
             disks.take(6).forEach { device ->
                 ThroughputRow(
                     name = device.display,
-                    down = device.gauge("read_bytes")?.let(format),
-                    up = device.gauge("write_bytes")?.let(format),
+                    incoming = device.gauge("read_bytes"),
+                    outgoing = device.gauge("write_bytes"),
+                    outgoingColor = Theme.warn,
+                    format = format,
                 )
             }
         }
@@ -497,17 +423,16 @@ private fun FilesystemPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> S
     if (mounts.isEmpty()) return
 
     Panel("Filesystems", subtitle = "${mounts.size} mounted") {
-        Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
-            mounts.forEach { mount ->
-                val usage = mount.gauge("usage") ?: return@forEach
+        AdaptiveGrid(minimum = 300.dp, horizontalSpacing = 18.dp, verticalSpacing = 10.dp, count = mounts.size) { index ->
+            val mount = mounts[index]
+            mount.gauge("usage")?.let { usage ->
                 CapacityRow(
                     name = mount.display,
                     usage = usage,
                     detail = mount.gauge("used")?.let { used ->
-                        mount.gauge("total")?.let { total ->
-                            "${format(used)} of ${format(total)}"
-                        }
+                        mount.gauge("total")?.let { total -> "${format(used)} / ${format(total)}" }
                     },
+                    usageText = format(usage),
                 )
             }
         }
@@ -530,18 +455,18 @@ private fun SensorPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> Strin
     val fans = sensors.filter { it.gauge("fan") != null }
     val power = sensors.filter { it.gauge("power") != null }
 
+    val readings = temperatures.map { it to "temp" } + fans.map { it to "fan" } +
+        power.map { it to "power" }
+
     Panel("Temperature & power", subtitle = "${sensors.size} sensors") {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            temperatures.forEach { sensor ->
-                val temp = sensor.gauge("temp")!!
-                KeyValueRow(sensor.display, format(temp), emphasis = heatColour(temp))
-            }
-            fans.forEach { sensor ->
-                KeyValueRow(sensor.display, format(sensor.gauge("fan")!!))
-            }
-            power.forEach { sensor ->
-                KeyValueRow(sensor.display, format(sensor.gauge("power")!!))
-            }
+        AdaptiveGrid(minimum = 150.dp, horizontalSpacing = 18.dp, verticalSpacing = 5.dp, count = readings.size) { index ->
+            val (sensor, metric) = readings[index]
+            val gauge = sensor.gauge(metric)!!
+            KeyValueRow(
+                sensor.display,
+                format(gauge),
+                emphasis = if (metric == "temp") heatColour(gauge) else Theme.primary,
+            )
         }
     }
 }
@@ -572,52 +497,123 @@ private fun heatColour(gauge: MetricGauge): Color {
 @Composable
 private fun ProcessPanel(snapshot: TargetSnapshot, model: CoreModel) {
     if (snapshot.topProcesses.isEmpty()) return
+    val cores = snapshot.cpuCount.toDouble().coerceAtLeast(1.0)
 
     Panel("Processes", subtitle = "top ${snapshot.topProcesses.size}") {
         Column {
-            Row(Modifier.fillMaxWidth().padding(bottom = 5.dp)) {
-                Text("PID", color = Theme.tertiary, fontSize = 9.sp, modifier = Modifier.width(48.dp))
-                Text("COMMAND", color = Theme.tertiary, fontSize = 9.sp, modifier = Modifier.weight(1f))
-                Text("CPU", color = Theme.tertiary, fontSize = 9.sp, modifier = Modifier.width(52.dp))
-                Text("MEMORY", color = Theme.tertiary, fontSize = 9.sp, modifier = Modifier.width(68.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ColumnHeader("PID", 52.dp, TextAlign.End)
+                Text(
+                    "COMMAND",
+                    color = Theme.tertiary,
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.5.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                ColumnHeader("CPU", 100.dp, TextAlign.End)
+                ColumnHeader("MEMORY", 72.dp, TextAlign.End)
             }
+
             snapshot.topProcesses.forEach { process ->
+                // Share of the whole machine, which is what the bar should represent — 100% of one
+                // core on a 20-core box is 5% of the host, and drawing it full would be alarming
+                // nonsense.
+                val machineFraction = (process.cpuPercent / (cores * 100)).coerceIn(0.0, 1.0)
+
                 Row(
-                    Modifier.fillMaxWidth().padding(vertical = 5.dp),
+                    Modifier.fillMaxWidth().padding(vertical = 2.5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         process.pid,
                         color = Theme.tertiary,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.width(48.dp),
-                    )
-                    Text(
-                        process.command,
-                        color = Theme.primary,
-                        fontSize = 12.5.sp,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "%.0f%%".format(process.cpuPercent),
-                        color = if (process.cpuPercent >= 50) Theme.warn else Theme.secondary,
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.End,
                         modifier = Modifier.width(52.dp),
                     )
+                    Row(
+                        Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            process.command,
+                            color = Theme.primary,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        // Uninterruptible sleep and zombies are worth flagging; sleeping and
+                        // running are the normal states and a badge for them would be noise.
+                        if (process.state == "D" || process.state == "Z") {
+                            Text(
+                                process.state,
+                                color = Theme.warn,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(Theme.warn.copy(alpha = 0.15f))
+                                    .padding(horizontal = 3.dp, vertical = 1.dp),
+                            )
+                        }
+                    }
+                    Row(
+                        Modifier.width(100.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.width(46.dp)) {
+                            CapacityBar(
+                                machineFraction,
+                                Theme.severity(machineFraction),
+                                height = 4.dp,
+                            )
+                        }
+                        Text(
+                            "%.1f%%".format(process.cpuPercent),
+                            color = Theme.primary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.width(48.dp),
+                        )
+                    }
                     Text(
                         model.format(process.memoryBytes, "B", true),
                         color = Theme.secondary,
-                        fontSize = 12.sp,
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.width(68.dp),
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.width(72.dp),
                     )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ColumnHeader(text: String, width: Dp, align: TextAlign) {
+    Text(
+        text,
+        color = Theme.tertiary,
+        fontSize = 8.5.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 0.5.sp,
+        textAlign = align,
+        modifier = Modifier.width(width),
+    )
 }
 
 /** Any group the core produced, rendered as plain label/value pairs. */
@@ -631,25 +627,26 @@ private fun GroupPanel(
     if (group.gauges.isEmpty()) return
 
     Panel(group.title) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            // Twenty socket counters are numbers to read, not gauges to interpret.
-            group.gauges.forEach { gauge ->
-                KeyValueRow(
-                    gauge.label,
-                    format(gauge),
-                    emphasis = if (gauge.metric == "tcp_retrans" && gauge.value > 0) {
-                        Theme.warn
-                    } else {
-                        Theme.primary
-                    },
-                )
-            }
+        // Twenty socket counters are numbers to read, not gauges to interpret.
+        AdaptiveGrid(minimum = 150.dp, horizontalSpacing = 18.dp, verticalSpacing = 5.dp, count = group.gauges.size) { index ->
+            val gauge = group.gauges[index]
+            KeyValueRow(
+                gauge.label,
+                format(gauge),
+                emphasis = if (gauge.metric == "tcp_retrans" && gauge.value > 0) Theme.warn else Theme.primary,
+            )
         }
     }
 }
 
 // ---------------------------------------------------------------- pieces
+//
+// Every measurement below is taken from the matching SwiftUI component in
+// `apps/shared/ServerGlassUI/Components.swift`, down to the point size and the column width. The
+// two dashboards are meant to be the same dashboard; a font a point larger here is how "the same"
+// becomes "nearly the same" and then becomes two designs.
 
+/** Mirrors `Panel` in DesignSystem.swift. */
 @Composable
 private fun Panel(
     title: String,
@@ -660,117 +657,152 @@ private fun Panel(
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(Theme.panel)
-            .border(1.dp, Theme.border, RoundedCornerShape(14.dp))
-            .padding(13.dp),
+            .border(1.dp, Theme.border, RoundedCornerShape(10.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                title,
-                color = Theme.primary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
+                title.uppercase(),
+                color = Theme.secondary,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.8.sp,
             )
-            subtitle?.let { Text(it, color = Theme.tertiary, fontSize = 10.5.sp) }
+            subtitle?.let {
+                Text(
+                    it,
+                    color = Theme.tertiary,
+                    fontSize = 9.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
         }
-        Spacer(Modifier.height(11.dp))
         content()
     }
 }
 
+/** Mirrors `RingGauge` + `HeadlineRing`. */
 @Composable
-private fun KeyValueRow(label: String, value: String, emphasis: Color = Theme.primary) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            label,
-            color = Theme.secondary,
-            fontSize = 12.sp,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
-        )
-        Text(value, color = emphasis, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-    }
-}
-
-@Composable
-private fun CoreBar(name: String, gauge: MetricGauge?, value: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            name,
-            color = Theme.tertiary,
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.width(38.dp),
-        )
-        Box(
-            Modifier
-                .weight(1f)
-                .height(7.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Theme.track),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth((gauge?.fraction() ?: 0.0).toFloat())
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(gauge?.severity() ?: Theme.good),
+private fun HeadlineRing(gauge: MetricGauge, caption: String, detail: String?) {
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                val stroke = 6.dp.toPx()
+                val inset = stroke / 2
+                val arc = Size(size.width - stroke, size.height - stroke)
+                drawArc(
+                    color = Theme.track,
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = Offset(inset, inset),
+                    size = arc,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+                gauge.fraction()?.let {
+                    drawArc(
+                        color = gauge.color(),
+                        startAngle = -90f,
+                        sweepAngle = (it * 360).toFloat(),
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = arc,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
+                }
+            }
+            Text(
+                caption,
+                color = Theme.primary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
             )
         }
-        Spacer(Modifier.width(9.dp))
-        Text(
-            value,
-            color = Theme.secondary,
-            fontSize = 10.5.sp,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.width(46.dp),
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(gauge.label, color = Theme.primary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+            detail?.let {
+                Text(
+                    it,
+                    color = Theme.secondary,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
     }
 }
 
+/** Mirrors `CapacityBar`: 6dp by default, never thinner than 2dp of fill. */
 @Composable
-private fun CapacityRow(name: String, usage: MetricGauge, detail: String?) {
-    Column {
+private fun CapacityBar(fraction: Double, color: Color, height: Dp = 6.dp) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(CircleShape)
+            .background(Theme.track),
+    ) {
+        val share = fraction.coerceIn(0.0, 1.0).toFloat()
+        if (share > 0f) {
+            Box(Modifier.fillMaxWidth(share).fillMaxHeight().clip(CircleShape).background(color))
+        }
+    }
+}
+
+/** Mirrors `CapacityRow`. */
+@Composable
+private fun CapacityRow(name: String, usage: MetricGauge, detail: String?, usageText: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 name,
                 color = Theme.primary,
-                fontSize = 12.sp,
-                maxLines = 1,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                "%.0f%%".format(usage.value),
-                color = usage.severity(),
-                fontSize = 12.sp,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
                 fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.weight(1f))
+            detail?.let {
+                Text(
+                    it,
+                    color = Theme.secondary,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                usageText,
+                color = usage.color(),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace,
+                textAlign = TextAlign.End,
+                modifier = Modifier.width(46.dp),
             )
         }
-        Spacer(Modifier.height(5.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(Theme.track),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth((usage.fraction() ?: 0.0).toFloat())
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(usage.severity()),
-            )
-        }
-        detail?.let {
-            Spacer(Modifier.height(3.dp))
-            Text(it, color = Theme.tertiary, fontSize = 10.5.sp)
-        }
+        CapacityBar(usage.fraction() ?: 0.0, usage.color())
     }
 }
 
+/** Mirrors `StatCell`. */
 @Composable
 private fun StatCell(
     label: String,
@@ -778,50 +810,212 @@ private fun StatCell(
     color: Color,
     history: List<Double>,
     modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
 ) {
-    Column(
-        modifier
-            .clip(RoundedCornerShape(11.dp))
-            .background(Theme.card)
-            .padding(11.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).clip(CircleShape).background(color))
-            Spacer(Modifier.width(6.dp))
-            Text(label, color = Theme.secondary, fontSize = 10.5.sp)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            icon?.let { Icon(it, contentDescription = null, tint = color, modifier = Modifier.size(8.dp)) }
+            Text(
+                label.uppercase(),
+                color = Theme.secondary,
+                fontSize = 8.5.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.5.sp,
+                maxLines = 1,
+            )
         }
-        Spacer(Modifier.height(5.dp))
         Text(
             value,
-            color = Theme.primary,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
+            color = color,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
         )
         if (history.size > 1) {
-            Spacer(Modifier.height(7.dp))
-            Sparkline(history, color, Modifier.fillMaxWidth().height(20.dp))
+            Sparkline(history, color, Modifier.fillMaxWidth().height(14.dp))
         }
     }
 }
 
+/** Mirrors `KeyValueRow`. */
 @Composable
-private fun ThroughputRow(name: String, down: String?, up: String?) {
+private fun KeyValueRow(label: String, value: String, emphasis: Color = Theme.primary) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            name,
-            color = Theme.primary,
-            fontSize = 12.sp,
+            label,
+            color = Theme.secondary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             modifier = Modifier.weight(1f),
         )
-        down?.let {
-            Text("↓ $it", color = Theme.secondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        Spacer(Modifier.width(4.dp))
+        Text(
+            value,
+            color = emphasis,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Medium,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
+}
+
+/** Mirrors `CoreBar`. */
+@Composable
+private fun CoreBar(index: String, percent: Double) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            index,
+            color = Theme.tertiary,
+            fontSize = 8.5.sp,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(16.dp),
+        )
+        Box(Modifier.weight(1f)) {
+            CapacityBar(percent / 100, Theme.severity(percent / 100), height = 5.dp)
         }
-        Spacer(Modifier.width(10.dp))
-        up?.let {
-            Text("↑ $it", color = Theme.secondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        Text(
+            "${Math.round(percent)}",
+            color = Theme.secondary,
+            fontSize = 8.5.sp,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(18.dp),
+        )
+    }
+}
+
+/** One slice of the CPU stacked bar. */
+private data class Segment(val label: String, val percent: Double, val color: Color)
+
+/** Mirrors `StackedBar`. */
+@Composable
+private fun StackedBar(segments: List<Segment>) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(CircleShape)
+                .background(Theme.track),
+        ) {
+            segments.forEach { segment ->
+                val share = (segment.percent / 100.0).coerceIn(0.0, 1.0).toFloat()
+                if (share > 0f) {
+                    Box(Modifier.fillMaxHeight().weight(share).background(segment.color))
+                }
+            }
+            val used = segments.sumOf { it.percent }.coerceIn(0.0, 100.0).toFloat() / 100f
+            if (used < 1f) Box(Modifier.fillMaxHeight().weight(1f - used))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            segments.forEach { segment ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(5.dp).clip(CircleShape).background(segment.color))
+                    Text(
+                        segment.label,
+                        color = Theme.secondary,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        "%.1f%%".format(segment.percent),
+                        color = Theme.primary,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Mirrors `InterfaceRow` and `DeviceRow`, which are the same row with different colours. */
+@Composable
+private fun ThroughputRow(
+    name: String,
+    incoming: MetricGauge?,
+    outgoing: MetricGauge?,
+    outgoingColor: Color,
+    format: (MetricGauge) -> String,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            name,
+            color = Theme.primary,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Medium,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.width(78.dp),
+        )
+        incoming?.let {
+            Sparkline(it.history, Theme.good, Modifier.weight(1f).height(14.dp))
+            Text(
+                format(it),
+                color = Theme.good,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                textAlign = TextAlign.End,
+                modifier = Modifier.width(74.dp),
+            )
+        }
+        outgoing?.let {
+            Text(
+                format(it),
+                color = outgoingColor,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                textAlign = TextAlign.End,
+                modifier = Modifier.width(74.dp),
+            )
+        }
+    }
+}
+
+/**
+ * A grid that fills as many columns of at least `minimum` as fit.
+ *
+ * `LazyVGrid(columns: .adaptive(minimum:))` in one composable, so the two dashboards break into
+ * the same number of columns at the same widths.
+ */
+@Composable
+private fun AdaptiveGrid(
+    minimum: Dp,
+    horizontalSpacing: Dp,
+    verticalSpacing: Dp,
+    count: Int,
+    item: @Composable (Int) -> Unit,
+) {
+    if (count == 0) return
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = ((maxWidth + horizontalSpacing) / (minimum + horizontalSpacing))
+            .toInt()
+            .coerceAtLeast(1)
+        Column(verticalArrangement = Arrangement.spacedBy(verticalSpacing)) {
+            (0 until count).chunked(columns).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(horizontalSpacing)) {
+                    row.forEach { index -> Box(Modifier.weight(1f)) { item(index) } }
+                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
         }
     }
 }
@@ -855,15 +1049,13 @@ fun EntityView.value(metric: String): Double = gauge(metric)?.value ?: 0.0
 /** 0–1 for a ring or a bar, absent when the reading has no maximum to be a proportion of. */
 fun MetricGauge.fraction(): Double? = max?.takeIf { it > 0 }?.let { (value / it).coerceIn(0.0, 1.0) }
 
-/** Colour by how close to full, for the readings where full is a problem. */
-fun MetricGauge.severity(): Color {
-    val fraction = fraction() ?: return Theme.info
-    return when {
-        fraction >= 0.9 -> Theme.bad
-        fraction >= 0.75 -> Theme.warn
-        else -> Theme.good
-    }
-}
+/**
+ * Colour by how close to full — the same thresholds as `Theme.severity` on the Apple side.
+ *
+ * A reading with no maximum is not a proportion of anything, so it gets the neutral colour rather
+ * than a green that would imply "plenty of room left".
+ */
+fun MetricGauge.color(): Color = fraction()?.let { Theme.severity(it) } ?: Theme.info
 
 /** "6 of 14" when a list is capped, and nothing when everything is on screen. */
 private fun shown(count: Int, cap: Int): String =

@@ -86,6 +86,13 @@ object Theme {
     val bad = Color(0xFFF77070)
     val info = Color(0xFF6BA8F7)
 
+    /** The same 0.60 / 0.85 boundaries the Apple apps use. */
+    fun severity(fraction: Double): Color = when {
+        fraction < 0.60 -> good
+        fraction < 0.85 -> warn
+        else -> bad
+    }
+
     fun health(level: String): Color = when (level) {
         "ok" -> good
         "busy" -> warn
