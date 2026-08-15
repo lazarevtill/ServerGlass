@@ -45,7 +45,10 @@ targets:
         group: Generated
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass.ffi
+        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass
+        # Names the icon inside Assets.xcassets; without it Xcode compiles the catalog but the app
+        # still ships with the blank default.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon.ffi
         DEFINES_MODULE: YES
         # Embedded frameworks must carry an Info.plist; only the app target has an explicit one.
         GENERATE_INFOPLIST_FILE: YES
@@ -64,7 +67,10 @@ targets:
       - target: ServerGlassFFI
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass.ui
+        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass
+        # Names the icon inside Assets.xcassets; without it Xcode compiles the catalog but the app
+        # still ships with the blank default.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon.ui
         DEFINES_MODULE: YES
         GENERATE_INFOPLIST_FILE: YES
 
@@ -73,6 +79,7 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      - path: Assets.xcassets
     dependencies:
       - target: ServerGlassUI
         embed: true
@@ -101,3 +108,6 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass
+        # Names the icon inside Assets.xcassets; without it Xcode compiles the catalog but the app
+        # still ships with the blank default.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

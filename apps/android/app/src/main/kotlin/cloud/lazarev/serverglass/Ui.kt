@@ -21,7 +21,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -354,70 +357,98 @@ fun SimpleHostScreen(host: Host, model: CoreModel, modifier: Modifier = Modifier
     }
 }
 
-/** The host list, used as the single pane when folded and the left pane when open. */
+/**
+ * The host list — the single pane when folded, the left pane when open.
+ *
+ * The empty state used to be the words "No servers yet." on black, with no way to add one: the
+ * only route in was a debug command-line intent. On a phone that is not a sparse design, it is a
+ * dead end.
+ */
 @Composable
-fun HostList(model: CoreModel, modifier: Modifier = Modifier) {
-    LazyColumn(
-        modifier.fillMaxSize().background(Theme.background).padding(horizontal = 12.dp),
-    ) {
-        item {
+fun HostList(model: CoreModel, onAdd: () -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxSize().background(Theme.background)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 14.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 "ServerGlass",
                 color = Theme.primary,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(vertical = 14.dp),
+                modifier = Modifier.weight(1f),
             )
+            FilledTonalButton(onClick = onAdd) { Text("Add") }
         }
-        items(model.hosts) { host ->
-            val selected = host.id == model.selection
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (selected) Theme.panel else Color.Transparent)
-                    .border(
-                        1.dp,
-                        if (selected) Theme.border else Color.Transparent,
-                        RoundedCornerShape(10.dp),
-                    )
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Theme.health(host.snapshot.health.level)),
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        host.snapshot.displayName.ifEmpty { host.address },
-                        color = Theme.primary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                    )
-                    Text(
-                        host.snapshot.health.headline,
-                        color = Theme.secondary,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                    )
+
+        if (model.hosts.isEmpty()) {
+            EmptyState(onAdd)
+        } else {
+            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+                items(model.hosts) { host ->
+                    val selected = host.id == model.selection
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (selected) Theme.card else Theme.panel)
+                            .border(
+                                1.dp,
+                                if (selected) Theme.border else Color.Transparent,
+                                RoundedCornerShape(12.dp),
+                            )
+                            .clickable { model.selection = host.id }
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(9.dp)
+                                .clip(CircleShape)
+                                .background(Theme.health(host.snapshot.health.level)),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                host.snapshot.displayName.ifEmpty { host.address },
+                                color = Theme.primary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                            )
+                            Text(
+                                host.snapshot.health.headline,
+                                color = Theme.secondary,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                            )
+                        }
+                    }
                 }
             }
         }
-        if (model.hosts.isEmpty()) {
-            item {
-                Text(
-                    "No servers yet.",
-                    color = Theme.secondary,
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(12.dp),
-                )
-            }
-        }
+    }
+}
+
+/** Says what the app is for, and offers the one action available. */
+@Composable
+private fun EmptyState(onAdd: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("No servers yet", color = Theme.primary, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Add a server to see how it is doing. ServerGlass reads it over an existing " +
+                "connection and installs nothing on it.",
+            color = Theme.secondary,
+            fontSize = 13.sp,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(20.dp))
+        Button(onClick = onAdd) { Text("Add a server") }
     }
 }

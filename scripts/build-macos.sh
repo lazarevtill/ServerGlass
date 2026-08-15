@@ -47,6 +47,11 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "apps/.build/$PROFILE/ServerGlass" "$APP/Contents/MacOS/ServerGlass"
 
+# The icon is generated from source (scripts/make-icons.swift) rather than committed as binaries.
+echo "==> icon"
+swift scripts/make-icons.swift >/dev/null
+iconutil -c icns target/ServerGlass.iconset -o "$APP/Contents/Resources/ServerGlass.icns"
+
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -56,8 +61,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>ServerGlass</string>
     <key>CFBundleIdentifier</key><string>cloud.lazarev.serverglass</string>
     <key>CFBundleExecutable</key><string>ServerGlass</string>
+    <key>CFBundleIconFile</key><string>ServerGlass</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleShortVersionString</key><string>0.1.1</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>

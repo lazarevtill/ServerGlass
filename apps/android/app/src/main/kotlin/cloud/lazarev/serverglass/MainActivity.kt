@@ -18,11 +18,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -38,7 +42,22 @@ class MainActivity : ComponentActivity() {
         val demoKey = intent?.getStringExtra("key")
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    // Material's default is purple. Every control in the app should be the same
+                    // green the gauges are, or the buttons look like they belong to another app.
+                    primary = Theme.good,
+                    onPrimary = Color(0xFF06210F),
+                    secondaryContainer = Theme.good.copy(alpha = 0.22f),
+                    onSecondaryContainer = Theme.primary,
+                    surface = Theme.background,
+                    onSurface = Theme.primary,
+                    surfaceVariant = Theme.panel,
+                    onSurfaceVariant = Theme.secondary,
+                    background = Theme.background,
+                    onBackground = Theme.primary,
+                ),
+            ) {
                 Surface(Modifier.fillMaxSize(), color = Theme.background) {
                     // `enableEdgeToEdge` lets the app draw behind the system bars, which is what
                     // makes the background reach the screen edges — but content still has to be
@@ -69,17 +88,22 @@ fun App(model: CoreModel = viewModel(), demoHost: String? = null, demoKey: Strin
     val twoPane = windowSize.widthSizeClass != WindowWidthSizeClass.Compact
 
     val selected = model.host(model.selection) ?: model.hosts.firstOrNull()
+    var addingServer by remember { mutableStateOf(false) }
 
-    if (twoPane) {
-        TwoPane(model = model, fold = fold, selected = selected)
+    if (twoPane && model.hosts.isNotEmpty()) {
+        TwoPane(model = model, fold = fold, selected = selected, onAdd = { addingServer = true })
     } else {
         Box(Modifier.fillMaxSize().background(Theme.background)) {
             if (selected != null && model.selection != null) {
                 SimpleHostScreen(host = selected, model = model)
             } else {
-                HostList(model = model)
+                HostList(model = model, onAdd = { addingServer = true })
             }
         }
+    }
+
+    if (addingServer) {
+        AddServerDialog(model = model, onDismiss = { addingServer = false })
     }
 }
 
@@ -93,7 +117,7 @@ fun App(model: CoreModel = viewModel(), demoHost: String? = null, demoKey: Strin
  * tolerates a foldable and one that fits it.
  */
 @Composable
-private fun TwoPane(model: CoreModel, fold: FoldState, selected: Host?) {
+private fun TwoPane(model: CoreModel, fold: FoldState, selected: Host?, onAdd: () -> Unit) {
     val density = LocalDensity.current
 
     Row(Modifier.fillMaxSize().background(Theme.background)) {
@@ -104,12 +128,12 @@ private fun TwoPane(model: CoreModel, fold: FoldState, selected: Host?) {
                 with(density) { (fold.hingeWidthPx / 2).toDp() }
             val hingeWidth = with(density) { fold.hingeWidthPx.toDp() }
 
-            HostList(model = model, modifier = Modifier.width(listWidth).fillMaxHeight())
+            HostList(model = model, onAdd = onAdd, modifier = Modifier.width(listWidth).fillMaxHeight())
             // The seam. Deliberately empty.
             Spacer(Modifier.width(hingeWidth).fillMaxHeight())
             DetailPane(model = model, selected = selected, modifier = Modifier.weight(1f))
         } else {
-            HostList(model = model, modifier = Modifier.width(300.dp).fillMaxHeight())
+            HostList(model = model, onAdd = onAdd, modifier = Modifier.width(300.dp).fillMaxHeight())
             DetailPane(model = model, selected = selected, modifier = Modifier.weight(1f))
         }
     }
