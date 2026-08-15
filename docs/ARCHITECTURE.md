@@ -1,7 +1,8 @@
 # ServerGlass architecture
 
-This document explains the decisions that are not obvious from reading the code, and the reasoning
-behind them. For what exists today versus what is planned, see the README's roadmap.
+The decisions that are not obvious from reading the code, and the reasoning behind them. For what
+exists versus what is planned, see the README. For why the interface looks the way it does, see
+[DESIGN.md](DESIGN.md).
 
 ## The shape of the system
 
@@ -16,18 +17,16 @@ pub trait Source: Send + Sync {
 ```
 
 A collector *declares* what it needs, and separately *parses* what came back. It never performs
-I/O. Four things fall out of that, and they are the reasons the split exists:
+I/O. Four things fall out of that:
 
 1. **One round trip per refresh.** The scheduler collects requests from every enabled source,
    deduplicates them, and issues one batch. Adding collectors costs bytes, not round trips.
 2. **Deduplication is free.** `/proc/stat` wanted by three sources is fetched once.
 3. **The trait is synchronous.** No async machinery, no per-call allocation — and, decisively, a
-   WebAssembly plugin's synchronous exported functions map onto it exactly. Built-ins, declarative
-   probes and plugins are genuinely the same kind of thing.
+   WebAssembly plugin's synchronous exported functions map onto it exactly.
 4. **Plugins need no capabilities.** A plugin can *ask* for a file and *parse* the answer, but
-   cannot open a socket or run a command. The host's policy decides what its requests turn into.
-   That is a far stronger position than sandboxing a plugin that does its own I/O, and it matters
-   for a tool holding SSH credentials.
+   cannot open a socket or run a command. That is a far stronger position than sandboxing a plugin
+   that does its own I/O, and it matters for a tool holding SSH credentials.
 
 ## Transport
 
@@ -56,22 +55,24 @@ happened to contain the end marker would truncate the frame — and on a monitor
 being read is often a log somebody else writes to. A monitored host cannot predict a nonce created
 after the connection came up, so it cannot forge a boundary. There is a test that tries.
 
-The `\n` before each marker is emitted by us, not by the command, so output lacking a trailing
-newline cannot run into the marker; decoding strips exactly that one byte back off.
+Per-frame exit codes matter more than they look: a missing `/proc/pressure` is an expected outcome,
+not an error. `Responses::text` returns `None` for a non-zero exit, which is what lets every parser
+be written as `let Some(text) = r.text(&req) else { return Ok(()) };`.
 
-Per-frame exit codes matter more than they look: a missing `/proc/pressure` is an expected outcome
-on many hosts, not an error. `Responses::text` returns `None` for a non-zero exit, which is what
-lets every parser be written as `let Some(text) = r.text(&req) else { return Ok(()) };` — a source
-silently produces nothing on hosts that lack its data.
+### The exit-status trap, twice
 
-### A bug worth remembering
+Capability detection probes for binaries with one shell loop rather than one request per binary. A
+shell loop exits with the status of its **last** iteration, so on any host missing the last-listed
+binary the whole probe reported failure and its perfectly good output was discarded by the
+exit-code filter above.
 
-Capability detection probes for binaries with one shell loop rather than one request per binary.
-A shell loop exits with the status of its **last** iteration, so on any host missing the
-last-listed binary the whole probe reported failure and its perfectly good output was discarded by
-the exit-code filter above. The fix is a trailing `exit 0`; the lesson is that for a probe whose
-output is the entire point, the final iteration's status is noise. `list_probes_normalise_their_exit_status`
-is the regression test.
+The same trap recurs wherever a batched command's output is the point rather than its status:
+
+- the binary and path probes (`sg-transport/src/probe.rs`)
+- the physical-interface and stacked-device probes (`sg-collect`)
+- the process table, where `cat /proc/[0-9]*/stat` fails if any process exits mid-glob
+
+All of them end in `exit 0`, and `list_probes_normalise_their_exit_status` is the regression test.
 
 ## Collection
 
@@ -81,10 +82,8 @@ Sources emit the cumulative number the kernel gave them and declare `SeriesKind:
 scheduler differentiates, using **measured** elapsed time — a tick that arrived 1.4 s after the
 last one must not be divided by the nominal 1.0 s interval.
 
-A counter produces no sample at all when it cannot honestly produce a rate: on first sighting (one
-reading is not a rate), after a counter goes backwards (reboot or recreated interface), or when no
-time has passed. Emitting zero or the raw value in those cases puts a spike or a trough on every
-chart at connect time.
+A counter produces no sample at all when it cannot honestly produce a rate: on first sighting, after
+a counter goes backwards (reboot, recreated interface), or when no time has passed.
 
 ### CPU, and why `scale` exists
 
@@ -93,39 +92,66 @@ CPU utilisation is not a time rate. It is a ratio of two deltas — busy jiffies
 
 Rather than make one collector stateful, `SeriesDescriptor` carries a `scale` applied after
 differentiation. The CPU source emits raw busy jiffies as a counter with `scale = 100 /
-clock_ticks`: the scheduler differentiates to jiffies-per-second, the scale converts that to
-percent of one core, and the source stays a pure function. The aggregate row divides again by the
-core count, normalising any machine to 0–100 %.
+clock_ticks`: the scheduler differentiates to jiffies-per-second, the scale converts that to percent
+of one core, and the source stays a pure function. The aggregate divides again by the core count.
 
-`clock_ticks` is measured with `getconf CLK_TCK` rather than assumed to be 100 — an assumption
-that is right nearly everywhere and silently wrong where it isn't.
+`clock_ticks` is measured with `getconf CLK_TCK` rather than assumed to be 100 — an assumption that
+is right nearly everywhere and silently wrong where it isn't.
 
-`iowait` counts as idle, not busy. The CPU was available; the disk was not. Counting it as busy
-makes an I/O-bound host look saturated.
+`iowait` counts as idle, not busy. The CPU was available; the disk was not.
+
+The same mechanism gives per-process CPU for free: `utime + stime` is a counter with the same
+scale, so a process spanning four cores reads 400%, exactly as `top` reports it.
+
+### Host totals must not double-count
+
+Two defects of the same shape, both found only by running against a real Proxmox host, both
+producing wrong numbers in the largest type on the panel:
+
+**Network.** Summing every non-loopback interface counts the same traffic on the physical port and
+again on `vmbr0`, and again on each `tap`/`veth` — two to four times the real wire rate. Host totals
+now sum only interfaces that have a sysfs `device` link. Asking the kernel what is hardware beats
+blocklisting name patterns, and it gets bonds and VLANs right for free. A host with no such
+interfaces (any container) falls back to the previous behaviour rather than reporting zero.
+
+**Disk.** `parent_device` only recognises name-prefixed partitions, so an LVM volume, mdraid array
+or ZFS zvol layered over a disk had its bytes added on top of the disk carrying the same I/O — and a
+default Proxmox install is LVM-thin. Stacked devices are now identified from
+`/sys/block/<dev>/slaves`, plus `zd*` by name since ZFS does not populate `slaves`.
 
 ### Memory
 
-`used = MemTotal - MemAvailable`. The older `total - free - buffers - cached` arithmetic is the
-reason so many tools report a healthy Linux host as out of memory; it is used only as a fallback on
-pre-3.14 kernels that do not publish `MemAvailable`.
+`used = MemTotal - MemAvailable`. The older `total - free - buffers - cached` arithmetic is why so
+many tools report a healthy Linux host as out of memory; it is used only as a fallback on
+pre-3.14 kernels.
 
 A host with swap disabled gets no swap series at all — a 0/0 gauge renders as permanently full.
+
+### The process table
+
+`/proc/<pid>/stat`'s notorious trap is field 2: the command is parenthesised and may contain spaces
+*and* parentheses — `(Web Content)`, `(foo (bar))`. Splitting on whitespace shifts every later field
+and silently attributes one process's CPU to another's column. Scanning to the **last** `)` is the
+only correct approach.
+
+Kernel threads are dropped (no resident memory, nothing to explain) and the set is capped at 256 by
+RSS so the live store stays bounded. Process entities are deliberately excluded from the snapshot's
+entity list — hundreds of them, each with a 300-point window, would dominate the cost of a refresh
+twice a second. Only the ranked twelve cross the FFI.
 
 ### Statelessness and churn
 
 Sources re-declare their entities and descriptors every tick and never diff anything. The store
-upserts. This is what lets parsers stay pure while container and pod sets change underneath them —
-a stateful parser would have to reconcile the churn itself, in every collector.
+upserts. This is what lets parsers stay pure while container and pod sets change underneath them.
 
 The counterpart is `LiveStore::retain_entities`: anything not reported this tick is dropped, along
 with its series. Without it a container that exits stays on the dashboard forever with its last
-reading frozen in place, which reads as "still running" to anyone glancing at it.
+reading frozen in place.
 
 ## Live-only
 
-ServerGlass never opens a time-series database and never writes a sample to disk. What it keeps is
-a bounded window per series — 300 points by default, five minutes at a one-second refresh — so
-gauges can be charts rather than numbers.
+ServerGlass never opens a time-series database and never writes a sample to disk. What it keeps is a
+bounded window per series — 300 points by default, five minutes at a one-second refresh.
 
 The window is a hard cap, not a target. A host with 64 cores, 40 containers and a dozen disks
 produces on the order of a thousand series; an unbounded store would grow for as long as the app is
@@ -140,31 +166,32 @@ The core is a state machine; UIs send commands and render snapshots.
 
 Each target runs a background task that ticks on its own interval and publishes a finished
 `TargetSnapshot`. The UI polls it on a display timer. At a one-second refresh this is
-indistinguishable from a push stream, needs no callback interface implemented on four platforms,
-and cannot deadlock the tick loop behind a slow UI thread. A push-based event stream is the natural
-next step once the terminal lands — a terminal cannot be polled.
+indistinguishable from a push stream, needs no callback interface on four platforms, and cannot
+deadlock the tick loop behind a slow UI thread. A push-based event stream is the natural next step
+once the terminal lands — a terminal cannot be polled.
 
-View models are built in Rust, not in Swift. A gauge arrives already knowing its label, its bounds,
-its unit suffix and its sparkline, and `format_value` lives in the core so all four UIs format a
-byte rate identically. This is what keeps the "core owns all logic" invariant from eroding one
-convenience method at a time across four codebases.
+**The first tick is withheld.** Counter-derived series do not exist until the second reading.
+Publishing the first tick would render a status grid without its CPU and network tiles, which then
+appear a refresh later and shove every other tile sideways.
 
-### The first tick is withheld
-
-Counter-derived series do not exist until the second reading. Publishing the first tick would
-render a status grid without its CPU and network tiles, which then appear a refresh later and shove
-every other tile sideways. The poller holds the first tick back: one extra refresh interval of
-"Collecting…", in exchange for a grid that is complete and stable the moment it appears.
+View models are built in Rust, not in Swift or Kotlin. A gauge arrives already knowing its label,
+bounds, unit suffix and sparkline; `format_value` and the health verdicts live in the core. This is
+what keeps the "core owns all logic" invariant from eroding one convenience method at a time across
+four codebases.
 
 ### Bindings per platform
 
-- **macOS / Android** — UniFFI's officially supported Swift and Kotlin backends.
-- **Linux** — `gtk4-rs`, linking the core directly. No FFI at all.
-- **Windows** — `uniffi-bindgen-cs`, which is third-party and young; hand-written `extern "C"`
-  plus `csbindgen` is the documented fallback if it proves unstable.
+- **macOS / iOS / iPadOS** — UniFFI's Swift backend. The Swift wrapper and the UI target are shared
+  between the Mac and iOS apps verbatim.
+- **Android** — UniFFI's Kotlin backend, calling into the `.so` through JNA. Built with `cargo-ndk`.
+- **Linux** (planned) — `gtk4-rs`, linking the core directly. No FFI at all.
+- **Windows** (planned) — `uniffi-bindgen-cs`, which is third-party and young; hand-written
+  `extern "C"` plus `csbindgen` is the documented fallback.
 
-The core API is kept narrow and free of generics and complex trait objects precisely so all of
-those backends can handle it.
+A second binding backend earns its keep immediately. `SgError` originally carried a `message` field;
+UniFFI maps an error enum onto a Kotlin `Exception` subclass, which already has `message`, and the
+duplicate made every reference an overload-resolution ambiguity that failed the Android build. The
+field is now `detail`. That defect was invisible with only Swift.
 
 ## Testing
 
@@ -176,5 +203,8 @@ those backends can handle it.
 - **The batching guarantee** has a regression test: `SshSession` counts round trips, and the
   end-to-end tests assert a refresh spends exactly one however many collectors are enabled. The
   running app displays the same counter, so the claim is observable rather than merely asserted.
+- **The FFI layer** is driven exactly as a UI drives it — add target, start, poll snapshots —
+  because it is the layer all four apps sit on.
 - **Fixtures are required, not optional**, under `SG_REQUIRE_FIXTURES=1`. A skipped test reports as
-  `ok`; this is how a suite quietly stops testing anything.
+  `ok`; this is how a suite quietly stops testing anything, and it happened once already when a
+  fixture container died on a missing `/run/sshd`.
