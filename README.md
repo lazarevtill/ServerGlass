@@ -24,8 +24,21 @@ Every other number is one tap away.
 All of them share one Rust core: the collectors, the scheduler, the rate maths, the health
 verdicts, the wording and the number formatting are written once.
 
-**194 tests**, including live runs against Debian and Alpine SSH fixtures, and a regression test
+**207 tests**, including live runs against Debian and Alpine SSH fixtures, and a regression test
 asserting that a full refresh costs exactly one network round trip.
+
+## Install
+
+Built installers for each tagged version are on the
+[releases page](https://gitlab.lazarev.cloud/lazarevtill/serverglass/-/releases).
+
+- **macOS** — open the `.dmg` and drag ServerGlass to Applications. The build is ad-hoc signed
+  rather than notarised, so the first launch needs right-click > Open (or
+  `xattr -dr com.apple.quarantine /Applications/ServerGlass.app`).
+- **Android** — install the `.apk`. It is signed with a key belonging to this project rather than
+  to Google Play, so your browser or file manager will ask you to allow the install.
+- **iOS** — no `.ipa`, because distributing one needs an Apple Developer signing identity. Build it
+  from source with `scripts/build-ios.sh`.
 
 ## Why this exists
 

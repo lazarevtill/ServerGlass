@@ -114,12 +114,18 @@ ls -1 "$DIST"
 # The release description. Kept out of the JSON literal so quoting stays readable; newlines are
 # escaped because the description is embedded in a JSON string.
 release_notes() {
-    printf '%s' "Agentless server monitoring over SSH. Nothing is installed on the monitored host.\\n\\n\\
-**macOS** — open the .dmg and drag ServerGlass to Applications. The build is ad-hoc signed rather \\
-than notarised, so the first launch needs right-click > Open.\\n\\n\\
-**Android** — install the .apk. Signed with this project's own key, so you may need to allow \\
-installs from your browser or file manager.\\n\\n\\
-Built from $(git rev-parse --short HEAD)."
+    # `%s\\n` prints a literal backslash-n, which is what a JSON string wants. A real newline here
+    # would make the request body invalid JSON, and GitLab answers that with a bare 400.
+    printf '%s\\n' \
+        'Agentless server monitoring over SSH. Nothing is installed on the monitored host.' \
+        '' \
+        '**macOS** - open the .dmg and drag ServerGlass to Applications. The build is ad-hoc' \
+        'signed rather than notarised, so the first launch needs right-click > Open.' \
+        '' \
+        '**Android** - install the .apk. Signed with a key belonging to this project rather than' \
+        'to Google Play, so your browser or file manager will ask you to allow the install.' \
+        '' \
+        "Built from $(git rev-parse --short HEAD)."
 }
 
 if [[ -n $PUBLISH ]]; then
@@ -148,11 +154,11 @@ if [[ -n $PUBLISH ]]; then
     # Create the release itself. Without this the files sit in the package registry with nothing
     # pointing at them, and the Releases page stays empty.
     echo "==> creating the release"
+    # Built on one line: a `\` continuation inside the quoted body would put a real backslash and
+    # a real newline into the JSON string.
+    BODY="{\"name\":\"ServerGlass $VERSION\",\"tag_name\":\"v$VERSION\",\"ref\":\"main\",\"description\":\"$(release_notes)\",\"assets\":{\"links\":[$LINKS]}}"
     curl -sS --fail -X POST -H "PRIVATE-TOKEN: $SG_GITLAB_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{\"name\":\"v$VERSION\",\"tag_name\":\"v$VERSION\",\"ref\":\"main\",\
-             \"description\":\"$(release_notes)\",\"assets\":{\"links\":[$LINKS]}}" \
-        "$API/releases" >/dev/null
+        -H "Content-Type: application/json" -d "$BODY" "$API/releases" >/dev/null
 
     echo "    release v$VERSION created: https://gitlab.lazarev.cloud/lazarevtill/serverglass/-/releases/v$VERSION"
 fi
