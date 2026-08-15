@@ -115,22 +115,21 @@ if [[ -n $PUBLISH ]]; then
     API=https://gitlab.lazarev.cloud/api/v4/projects/lazarevtill%2Fserverglass
 
     echo
-    echo "==> uploading to GitLab"
+    echo "==> uploading to the package registry"
+    # The generic package registry, not /uploads. Project uploads are served to browser sessions;
+    # fetching one with an API token returns the login page, so a release whose assets point there
+    # is only downloadable by someone already signed in. Package registry files are fetchable with
+    # a token, and anonymously when the project is public.
     LINKS=""
     for file in "$DIST"/*; do
-        url=$(curl -sS --fail -H "PRIVATE-TOKEN: $SG_GITLAB_TOKEN" \
-            -F "file=@$file" "$API/uploads" | sed -n 's/.*"full_path":"\([^"]*\)".*/\1/p')
         name=$(basename "$file")
-        LINKS="$LINKS{\"name\":\"$name\",\"url\":\"https://gitlab.lazarev.cloud$url\"},"
+        curl -sS --fail -H "PRIVATE-TOKEN: $SG_GITLAB_TOKEN" \
+            --upload-file "$file" \
+            "$API/packages/generic/serverglass/$VERSION/$name" >/dev/null
+        LINKS="$LINKS{\"name\":\"$name\",\"url\":\"$API/packages/generic/serverglass/$VERSION/$name\",\"link_type\":\"package\"},"
         echo "    uploaded $name"
     done
     LINKS=${LINKS%,}
 
-    curl -sS --fail -X POST -H "PRIVATE-TOKEN: $SG_GITLAB_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{\"name\":\"ServerGlass $VERSION\",\"tag_name\":\"v$VERSION\",\"ref\":\"main\",
-             \"description\":\"Agentless server monitoring for macOS, iOS, iPadOS and Android.\\n\\nmacOS: open the .dmg and drag ServerGlass to Applications. The build is ad-hoc signed, so the first launch needs right-click > Open.\\n\\nAndroid: install the APK; it is signed with a local key, so enable installation from unknown sources.\\n\\niOS: build from source with scripts/build-ios.sh — distributing an .ipa needs an Apple Developer identity.\",
-             \"assets\":{\"links\":[$LINKS]}}" \
-        "$API/releases" >/dev/null
     echo "    release v$VERSION created"
 fi
