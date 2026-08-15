@@ -24,7 +24,7 @@ Every other number is one tap away.
 All of them share one Rust core: the collectors, the scheduler, the rate maths, the health
 verdicts, the wording and the number formatting are written once.
 
-**234 Rust tests**, including live runs against Debian and Alpine SSH fixtures and a regression
+**236 Rust tests**, including live runs against Debian and Alpine SSH fixtures and a regression
 test asserting that a full refresh costs exactly one network round trip — plus **7 Swift** and
 **7 Kotlin** tests over the parts those layers own: how a host is stored, what stays out of the
 record, and what an unreadable file costs.

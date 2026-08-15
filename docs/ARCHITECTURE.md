@@ -208,3 +208,20 @@ field is now `detail`. That defect was invisible with only Swift.
 - **Fixtures are required, not optional**, under `SG_REQUIRE_FIXTURES=1`. A skipped test reports as
   `ok`; this is how a suite quietly stops testing anything, and it happened once already when a
   fixture container died on a missing `/run/sshd`.
+
+
+## Host key storage
+
+Trusted host keys are recorded at a path the *application* chooses, not at `~/.ssh/known_hosts`.
+
+A desktop has that directory; an app sandbox does not, and an Android app process has no `HOME` in
+its environment at all. `learn_known_hosts` writes the file but will not create the directory
+holding it, so on mobile the write failed every time — and because the failure was discarded, the
+apps offered "remember this server's identity", recorded nothing, and would then have accepted a
+substituted key on every later connection.
+
+`ConnectionSpec::known_hosts` now carries the path. Apple passes
+`Application Support/ServerGlass/known_hosts` (not Caches, which the system may purge — losing the
+file silently downgrades security); Android passes `filesDir/ssh/known_hosts`. The transport
+creates the containing directory, and a write that still fails is surfaced as
+`HostKeyVerdict::AcceptedUnrecorded` rather than thrown away.
