@@ -15,6 +15,7 @@
 //!   that computed their own rates would need to remember the previous tick, and statelessness is
 //!   what keeps them testable and portable to the plugin ABI.
 
+pub mod cgroup;
 pub mod cpu;
 pub mod diskio;
 pub mod filesystem;
@@ -30,6 +31,7 @@ pub mod testing;
 
 use sg_model::Source;
 
+pub use cgroup::CgroupSource;
 pub use cpu::CpuSource;
 pub use diskio::DiskIoSource;
 pub use filesystem::FilesystemSource;
@@ -51,6 +53,7 @@ pub fn builtin_sources() -> Vec<Box<dyn Source>> {
         Box::new(NetworkSource::default()),
         Box::new(TcpSource::default()),
         Box::new(PressureSource::default()),
+        Box::new(CgroupSource::default()),
         Box::new(ProcessSource::default()),
     ]
 }
