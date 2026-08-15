@@ -1,30 +1,128 @@
 import ServerGlassFFI
 import SwiftUI
 
-struct ContentView: View {
+public struct ContentView: View {
+    public init() {}
+
     @EnvironmentObject private var model: CoreModel
     @State private var showingAddHost = false
+    /// Simple by default. Someone who needs the technical view will find it and it is remembered;
+    /// someone who does not should never be shown a load average.
+    @AppStorage("sg.showTechnicalDetails") private var showTechnical = false
+    #if os(iOS)
+        @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
 
-    var body: some View {
+    public var body: some View {
+        layout
+            .sheet(isPresented: $showingAddHost) { AddHostSheet() }
+    }
+
+    /// A phone gets a navigation stack; anything with room gets the two-column split.
+    ///
+    /// `NavigationSplitView` does collapse on a compact width, but it collapses to the sidebar and
+    /// never pushes — selection-based navigation has nowhere to go. On a phone the list has to
+    /// push its detail, which is a different structure, not a different width.
+    @ViewBuilder
+    private var layout: some View {
+        #if os(iOS)
+            if sizeClass == .compact {
+                stackLayout
+            } else {
+                splitLayout
+            }
+        #else
+            splitLayout
+        #endif
+    }
+
+    private var splitLayout: some View {
         NavigationSplitView {
             Sidebar(showingAddHost: $showingAddHost)
-                .navigationSplitViewColumnWidth(min: 196, ideal: 214, max: 300)
+                // Also on iPad: the default sidebar claims ~40% of an 11-inch screen, which
+                // squeezes the readings into two columns when three fit comfortably. The host
+                // list is short names and a dot; it does not need that much room.
+                .navigationSplitViewColumnWidth(min: 196, ideal: 220, max: 300)
         } detail: {
-            switch model.selection {
-            case .some(Selection.statusID):
-                StatusOverview(showingAddHost: $showingAddHost)
-            case .some(let id):
-                if let host = model.host(id: id) {
-                    HostDetailView(host: host)
-                } else {
-                    EmptyState(showingAddHost: $showingAddHost)
+            detail(for: model.selection)
+        }
+        // Balanced keeps the sidebar visible on a landscape iPad instead of overlaying it.
+        .navigationSplitViewStyle(.balanced)
+        #if os(macOS)
+            .frame(minWidth: 900, minHeight: 600)
+        #endif
+    }
+
+    #if os(iOS)
+        private var stackLayout: some View {
+            NavigationStack {
+                List {
+                    NavigationLink(value: Selection.statusID) {
+                        Label("All hosts", systemImage: "square.grid.2x2")
+                    }
+                    Section("Hosts") {
+                        ForEach(model.hosts) { host in
+                            NavigationLink(value: host.id) { SidebarRow(host: host) }
+                        }
+                        .onDelete { offsets in
+                            for index in offsets { model.removeHost(id: model.hosts[index].id) }
+                        }
+                    }
                 }
-            case nil:
-                EmptyState(showingAddHost: $showingAddHost)
+                .navigationTitle("ServerGlass")
+                .navigationDestination(for: String.self) { detail(for: $0) }
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            showingAddHost = true
+                        } label: {
+                            Label("Add Host", systemImage: "plus")
+                        }
+                    }
+                }
             }
         }
-        .sheet(isPresented: $showingAddHost) { AddHostSheet() }
-        .frame(minWidth: 900, minHeight: 600)
+    #endif
+
+    @ViewBuilder
+    private func detail(for selection: String?) -> some View {
+        switch selection {
+        case .some(Selection.statusID):
+            StatusOverview(showingAddHost: $showingAddHost)
+        case .some(let id):
+            if let host = model.host(id: id) {
+                Group {
+                    if showTechnical {
+                        HostDetailView(host: host)
+                    } else {
+                        SimpleHostView(host: host, showTechnical: $showTechnical)
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .automatic) {
+                        Button {
+                            withAnimation { showTechnical.toggle() }
+                        } label: {
+                            Label(
+                                showTechnical ? "Simple view" : "Technical view",
+                                systemImage: showTechnical ? "gauge.low" : "chart.bar.doc.horizontal")
+                        }
+                        .help(showTechnical
+                            ? "Show the plain-language summary"
+                            : "Show every reading")
+                    }
+                }
+                    #if os(iOS)
+                        .navigationTitle(host.snapshot.displayName.isEmpty
+                            ? host.address : host.snapshot.displayName)
+                        .navigationBarTitleDisplayMode(.inline)
+                    #endif
+            } else {
+                EmptyState(showingAddHost: $showingAddHost)
+            }
+        case nil:
+            EmptyState(showingAddHost: $showingAddHost)
+        }
     }
 }
 
@@ -54,15 +152,17 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            Button {
-                showingAddHost = true
-            } label: {
-                Label("Add Host", systemImage: "plus").frame(maxWidth: .infinity)
+        #if os(macOS)
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    showingAddHost = true
+                } label: {
+                    Label("Add Host", systemImage: "plus").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderless)
+                .padding(9)
             }
-            .buttonStyle(.borderless)
-            .padding(9)
-        }
+        #endif
     }
 }
 

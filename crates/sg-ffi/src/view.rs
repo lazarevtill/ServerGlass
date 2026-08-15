@@ -86,6 +86,26 @@ pub struct DetailGroup {
     pub gauges: Vec<MetricGauge>,
 }
 
+/// One tile of the simple view: a name a person recognises, a number, and a sentence.
+///
+/// Assembled here rather than in each UI so that "Storage · 4.6% · 142 GiB free of 150 GiB" reads
+/// identically on every platform, and so the decision about *which* readings a non-technical
+/// person should see lives in one place.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct SimpleTile {
+    pub metric: String,
+    /// "Processor", "Memory", "Storage", "Running for".
+    pub name: String,
+    /// The headline number, already formatted.
+    pub value_text: String,
+    /// A sentence: "142.3 GiB free of 150.0 GiB", "Barely working".
+    pub summary: String,
+    /// 0-1 for the ring, absent for things with no proportion (uptime).
+    pub fraction: Option<f64>,
+    /// `ok`, `busy`, `problem` — drives colour without the UI re-deriving thresholds.
+    pub level: String,
+}
+
 /// One row of the process table.
 ///
 /// Flattened rather than reusing [`EntityView`]: a host runs hundreds of processes, and shipping
@@ -133,6 +153,10 @@ pub struct TargetSnapshot {
     pub entities: Vec<EntityView>,
     /// The busiest processes, already ranked. What explains a busy host.
     pub top_processes: Vec<ProcessView>,
+    /// One-line plain-language assessment of the host.
+    pub health: crate::plain::HostHealth,
+    /// The readings a non-technical person should see, in the order they should see them.
+    pub simple_tiles: Vec<SimpleTile>,
     /// Collectors that failed to parse this tick. Non-fatal.
     pub source_errors: Vec<String>,
     pub last_update_ms: i64,
@@ -144,6 +168,7 @@ pub struct TargetSnapshot {
 impl TargetSnapshot {
     /// A snapshot for a target that has produced nothing yet.
     pub fn placeholder(target_id: &str, host: &str, state: ConnectionState) -> Self {
+        let state_for_placeholder = state.clone();
         TargetSnapshot {
             target_id: target_id.to_string(),
             state,
@@ -156,6 +181,8 @@ impl TargetSnapshot {
             detail_groups: Vec::new(),
             entities: Vec::new(),
             top_processes: Vec::new(),
+            health: crate::plain::assess(&state_for_placeholder, &[], false),
+            simple_tiles: Vec::new(),
             source_errors: Vec::new(),
             last_update_ms: 0,
             round_trips: 0,
@@ -487,6 +514,89 @@ fn unit_of(suffix: &str) -> Option<Unit> {
     ]
     .into_iter()
     .find(|u| u.suffix() == suffix)
+}
+
+/// Build the simple view's tiles from the headline gauges.
+///
+/// Deliberately only four things. A non-technical person asked to watch six numbers watches none;
+/// processor, memory, storage and "has it been up" are the four that mean something without
+/// training, and everything else stays one tap away under the technical view.
+pub fn simple_tiles(
+    headline: &[MetricGauge],
+    all: &[MetricGauge],
+    entities: &[EntityView],
+) -> Vec<SimpleTile> {
+    const ORDER: [&str; 4] = ["cpu_usage", "mem_usage", "disk_usage", "uptime"];
+
+    let find = |metric: &str| headline.iter().find(|g| g.metric == metric);
+    // Sizes live in the detail groups, not the headline set, so the lookup has to span both. A
+    // tile that says "6% used" instead of "7.4 GiB free of 7.8 GiB" is the exact failure this
+    // whole layer exists to prevent.
+    let anywhere = |metric: &str| all.iter().find(|g| g.metric == metric).map(|g| g.value);
+
+    // Storage sizes belong to the root filesystem entity rather than to any host-level series.
+    let root = entities
+        .iter()
+        .find(|e| e.kind == "fs" && e.display == "/")
+        .map(|fs| {
+            let of = |metric: &str| {
+                fs.gauges
+                    .iter()
+                    .find(|g| g.metric == metric)
+                    .map(|g| g.value)
+            };
+            (of("used"), of("total"))
+        })
+        .unwrap_or((None, None));
+
+    ORDER
+        .iter()
+        .filter_map(|metric| {
+            let gauge = find(metric)?;
+            let name = crate::plain::plain_name(metric)?;
+
+            let (used, total) = match *metric {
+                "mem_usage" => (anywhere("mem_used"), anywhere("mem_total")),
+                "disk_usage" => root,
+                _ => (None, None),
+            };
+
+            let value_text = if *metric == "uptime" {
+                crate::format_uptime(gauge.value)
+            } else {
+                format_value(gauge.value, &gauge.unit_suffix, gauge.binary_scaled)
+            };
+
+            let level = match gauge.fraction_percent() {
+                Some(p) if p >= 90.0 => "problem",
+                Some(p) if p >= 80.0 => "busy",
+                _ => "ok",
+            };
+
+            Some(SimpleTile {
+                metric: (*metric).to_string(),
+                name: name.to_string(),
+                value_text,
+                summary: crate::plain::plain_summary(gauge, used, total),
+                fraction: gauge.display_fraction(),
+                level: level.to_string(),
+            })
+        })
+        .collect()
+}
+
+impl MetricGauge {
+    /// Percentage position within the metric's range, when it has one.
+    fn fraction_percent(&self) -> Option<f64> {
+        self.max
+            .filter(|m| *m > 0.0)
+            .map(|m| self.value / m * 100.0)
+    }
+
+    /// 0-1 position, for a ring.
+    fn display_fraction(&self) -> Option<f64> {
+        self.fraction_percent().map(|p| (p / 100.0).clamp(0.0, 1.0))
+    }
 }
 
 #[cfg(test)]

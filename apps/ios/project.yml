@@ -1,0 +1,103 @@
+# XcodeGen spec for the iOS / iPadOS app.
+#
+# The .xcodeproj is generated, not committed: a pbxproj is thousands of lines of opaque,
+# merge-hostile state, and everything that actually matters is in this file.
+#
+#   ./scripts/build-ios.sh                  # Rust staticlib -> bindings -> app
+#   ./scripts/build-ios.sh --run            # ...and launch it in a booted simulator
+#
+# The module layout mirrors the SwiftPM package the Mac app uses — ServerGlassFFI wraps the Rust
+# static library, ServerGlassUI holds every view — so the same source files compile unchanged on
+# both platforms. There is no iOS copy of any view.
+
+name: ServerGlass
+options:
+  bundleIdPrefix: cloud.lazarev
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # Apple Silicon only. The Rust staticlib is built for aarch64-apple-ios-sim; Xcode would
+    # otherwise also try x86_64 and fail to link a slice that does not exist.
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: YES
+    # Project-wide, not per-target: ServerGlassFFI's .swiftmodule records a dependency on the C
+    # module, so every downstream target has to be able to resolve it too.
+    SWIFT_INCLUDE_PATHS: $(SRCROOT)/../shared/ServerGlassFFI/generated
+    HEADER_SEARCH_PATHS: $(SRCROOT)/../shared/ServerGlassFFI/generated
+    # The generated UniFFI header is plain C interop with no umbrella; the module verifier tries to
+    # compile it standalone and fails.
+    ENABLE_MODULE_VERIFIER: NO
+    # Simulator builds need no identity, and there is no device provisioning profile here.
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+
+targets:
+  # The Rust core's Swift surface. Wraps the staticlib built by build-ios.sh.
+  ServerGlassFFI:
+    type: framework
+    platform: iOS
+    sources:
+      - path: ../shared/ServerGlassFFI/generated/sg_ffi.swift
+        group: Generated
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass.ffi
+        DEFINES_MODULE: YES
+        # Embedded frameworks must carry an Info.plist; only the app target has an explicit one.
+        GENERATE_INFOPLIST_FILE: YES
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/../../target/ios
+        OTHER_LDFLAGS: -lsg_ffi
+        # russh's crypto backend reaches into Security; resolv is needed by the DNS path.
+        OTHER_LDFLAGS[sdk=iphonesimulator*]: -lsg_ffi -lresolv -framework Security
+
+  # Every view, shared verbatim with the Mac app.
+  ServerGlassUI:
+    type: framework
+    platform: iOS
+    sources:
+      - path: ../shared/ServerGlassUI
+    dependencies:
+      - target: ServerGlassFFI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass.ui
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+
+  ServerGlass:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    dependencies:
+      - target: ServerGlassUI
+        embed: true
+      - target: ServerGlassFFI
+        embed: true
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: ServerGlass
+        UILaunchScreen: {}
+        UIUserInterfaceStyle: Dark
+        # Every orientation. The layout is driven by measured width rather than by orientation, so
+        # there is nothing to gain from restricting them — and a lot to lose on a large screen.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Opting in to Split View and Slide Over: the same reflow that serves a folded phone serves
+        # a third-width iPad window.
+        UIRequiresFullScreen: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass

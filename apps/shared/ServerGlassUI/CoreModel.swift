@@ -3,18 +3,18 @@ import ServerGlassFFI
 import SwiftUI
 
 /// A host the user has added, plus its most recent snapshot.
-struct Host: Identifiable, Equatable {
-    let id: String
-    var address: String
-    var snapshot: TargetSnapshot
+public struct Host: Identifiable, Equatable {
+    public let id: String
+    public var address: String
+    public var snapshot: TargetSnapshot
 
-    var isOnline: Bool {
+    public var isOnline: Bool {
         if case .online = snapshot.state { return true }
         return false
     }
 
     /// Short status text for the sidebar.
-    var statusText: String {
+    public var statusText: String {
         switch snapshot.state {
         case .idle: return "Idle"
         case .connecting: return "Connecting…"
@@ -24,7 +24,7 @@ struct Host: Identifiable, Equatable {
         }
     }
 
-    var statusColor: Color {
+    public var statusColor: Color {
         switch snapshot.state {
         case .online: return .green
         case .connecting, .reconnecting: return .orange
@@ -40,18 +40,18 @@ struct Host: Identifiable, Equatable {
 /// tick; this polls that snapshot on a display timer. Nothing here parses, schedules, or decides
 /// anything — that is all on the Rust side, shared with the other three platforms.
 @MainActor
-final class CoreModel: ObservableObject {
+public final class CoreModel: ObservableObject {
     private let core = ServerGlass()
 
-    @Published private(set) var hosts: [Host] = []
-    @Published var selection: String?
-    @Published var lastError: String?
+    @Published public private(set) var hosts: [Host] = []
+    @Published public var selection: String?
+    @Published public var lastError: String?
 
     /// `nonisolated(unsafe)` so `deinit`, which is not actor-isolated, may cancel it. `Task` is
     /// `Sendable` and cancellation is atomic, so the unsafety is nominal.
     private nonisolated(unsafe) var pollTask: Task<Void, Never>?
 
-    init() {
+    public init() {
         // 2 Hz against an in-process snapshot that is only rebuilt once per tick. Polling faster
         // than the core refreshes would just redraw identical values.
         pollTask = Task { [weak self] in
@@ -96,7 +96,7 @@ final class CoreModel: ObservableObject {
     }
 
     /// Register a host and start polling it.
-    func addHost(
+    public func addHost(
         address: String,
         port: UInt16,
         user: String,
@@ -130,19 +130,19 @@ final class CoreModel: ObservableObject {
         if selection == nil { selection = id }
     }
 
-    func removeHost(id: String) {
+    public func removeHost(id: String) {
         try? core.removeTarget(targetId: id)
         hosts.removeAll { $0.id == id }
         if selection == id { selection = hosts.first?.id }
     }
 
-    func host(id: String?) -> Host? {
+    public func host(id: String?) -> Host? {
         guard let id else { return nil }
         return hosts.first { $0.id == id }
     }
 
     /// Format a value exactly the way the Rust core does, so the four UIs never drift apart.
-    func format(_ gauge: MetricGauge) -> String {
+    public func format(_ gauge: MetricGauge) -> String {
         if gauge.metric == "uptime" {
             return core.formatDuration(seconds: gauge.value)
         }

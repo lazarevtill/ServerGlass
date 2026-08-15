@@ -12,7 +12,42 @@ struct HostDetailView: View {
 
     private var snapshot: TargetSnapshot { host.snapshot }
 
+    /// Below this width the two-column panels stack.
+    ///
+    /// Driven by measured width rather than by a size class, because the case that matters most is
+    /// a device whose width changes while the app is running — an unfolding phone, a resized
+    /// window, an iPad entering Split View. A `GeometryReader` re-evaluates on every one of those;
+    /// a size class does not always change, and stored state would go stale.
+    private static let wideThreshold: CGFloat = 680
+
     var body: some View {
+        GeometryReader { geometry in
+            content(wide: geometry.size.width >= Self.wideThreshold)
+        }
+        .background(Theme.background)
+    }
+
+    /// Two panels side by side when there is room, stacked when there is not.
+    @ViewBuilder
+    private func pair<A: View, B: View>(
+        _ wide: Bool,
+        @ViewBuilder _ first: () -> A,
+        @ViewBuilder _ second: () -> B
+    ) -> some View {
+        if wide {
+            HStack(alignment: .top, spacing: 12) {
+                first()
+                second()
+            }
+        } else {
+            VStack(spacing: 12) {
+                first()
+                second()
+            }
+        }
+    }
+
+    private func content(wide: Bool) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HostHeader(host: host)
@@ -38,14 +73,8 @@ struct HostDetailView: View {
                         .frame(maxWidth: .infinity, minHeight: 220)
                 } else {
                     overview
-                    HStack(alignment: .top, spacing: 12) {
-                        cpuPanel
-                        memoryPanel
-                    }
-                    HStack(alignment: .top, spacing: 12) {
-                        networkPanel
-                        diskPanel
-                    }
+                    pair(wide) { cpuPanel } _: { memoryPanel }
+                    pair(wide) { networkPanel } _: { diskPanel }
                     processPanel
                     filesystemPanel
                     socketsPanel
@@ -53,14 +82,18 @@ struct HostDetailView: View {
             }
             .padding(14)
         }
-        .background(Theme.background)
     }
 
     // MARK: Overview — the four questions asked first
 
     private var overview: some View {
         Panel(title: "Overview") {
-            HStack(spacing: 4) {
+            // A grid, not a row: six rings do not fit across a phone, and on a foldable the same
+            // view has to work at both widths without a second layout existing.
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 92, maximum: 170), spacing: 4)],
+                spacing: 12
+            ) {
                 if let cpu = snapshot.gauge("cpu_usage") {
                     HeadlineRing(
                         gauge: cpu,

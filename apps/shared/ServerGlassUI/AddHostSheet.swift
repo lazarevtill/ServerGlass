@@ -1,6 +1,12 @@
 import SwiftUI
 
-struct AddHostSheet: View {
+#if os(macOS)
+import AppKit
+#endif
+
+public struct AddHostSheet: View {
+    public init() {}
+
     @EnvironmentObject private var model: CoreModel
     @Environment(\.dismiss) private var dismiss
 
@@ -20,7 +26,7 @@ struct AddHostSheet: View {
             && (authKind != "key" || !keyPath.isEmpty)
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Add Host")
                 .font(.headline)
@@ -41,7 +47,11 @@ struct AddHostSheet: View {
                 if authKind == "key" {
                     HStack {
                         TextField("Key file", text: $keyPath, prompt: Text("~/.ssh/id_ed25519"))
-                        Button("Choose…") { chooseKey() }
+                        // iOS has no user-visible filesystem to browse for an SSH key, and no
+                        // NSOpenPanel. Keys reach a phone by other means; the path field stays.
+                        #if os(macOS)
+                            Button("Choose…") { chooseKey() }
+                        #endif
                     }
                     SecureField("Passphrase (optional)", text: $secret)
                 } else if authKind == "password" {
@@ -77,20 +87,25 @@ struct AddHostSheet: View {
             .padding(.top, 12)
         }
         .padding(18)
-        .frame(width: 420)
+        #if os(macOS)
+            .frame(width: 420)
+        #endif
     }
 
-    private func chooseKey() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.showsHiddenFiles = true
-        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh")
-        if panel.runModal() == .OK, let url = panel.url {
-            keyPath = url.path
+    #if os(macOS)
+        private func chooseKey() {
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = false
+            panel.allowsMultipleSelection = false
+            panel.showsHiddenFiles = true
+            panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent(".ssh")
+            if panel.runModal() == .OK, let url = panel.url {
+                keyPath = url.path
+            }
         }
-    }
+    #endif
 
     private func add() {
         model.addHost(

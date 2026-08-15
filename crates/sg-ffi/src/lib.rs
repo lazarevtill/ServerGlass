@@ -13,6 +13,7 @@
 //! thread. A push-based event stream is the natural next step once the terminal lands, which does
 //! need one — a terminal cannot be polled.
 
+pub mod plain;
 mod view;
 
 use std::collections::HashMap;
@@ -21,10 +22,14 @@ use std::sync::{Arc, Mutex, RwLock};
 use sg_core::{default_sources, TargetRuntime, TargetState};
 use sg_model::{now_ms, TargetId};
 
-use view::{connection_spec, entity_view, host_details, host_gauges, top_processes, PROCESS_KIND};
+pub use plain::HostHealth;
+use view::{
+    connection_spec, entity_view, host_details, host_gauges, simple_tiles, top_processes,
+    PROCESS_KIND,
+};
 pub use view::{
     format_uptime, format_value, ConnectionState, DetailGroup, EntityView, MetricGauge,
-    ProcessView, TargetConfig, TargetSnapshot,
+    ProcessView, SimpleTile, TargetConfig, TargetSnapshot,
 };
 
 uniffi::setup_scaffolding!();
@@ -280,14 +285,21 @@ fn build_snapshot(
         None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
     };
 
+    let state = ConnectionState::from(runtime.state());
     TargetSnapshot {
         target_id: target_id.to_string(),
-        state: ConnectionState::from(runtime.state()),
+        state: state.clone(),
         display_name: host.map(|h| h.display.clone()).unwrap_or_default(),
         distro: caps.map(|c| c.distro.clone()).unwrap_or_default(),
         kernel: caps.map(|c| c.kernel.clone()).unwrap_or_default(),
         arch: caps.map(|c| c.arch.clone()).unwrap_or_default(),
         cpu_count: caps.map(|c| c.cpu_count).unwrap_or(0),
+        health: plain::assess(&state, &gauges, !gauges.is_empty()),
+        simple_tiles: {
+            let mut all = gauges.clone();
+            all.extend(detail_groups.iter().flat_map(|g| g.gauges.iter().cloned()));
+            simple_tiles(&gauges, &all, &entities)
+        },
         gauges,
         detail_groups,
         entities,

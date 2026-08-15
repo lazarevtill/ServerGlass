@@ -1,4 +1,5 @@
 import AppKit
+import ServerGlassUI
 import SwiftUI
 
 /// Promotes the process to a regular, window-owning application.

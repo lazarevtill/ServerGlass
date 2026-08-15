@@ -31,7 +31,7 @@ mv -f "$GENERATED/sg_ffiFFI.modulemap" "$GENERATED/module.modulemap"
 
 echo "==> building the app"
 (
-    cd apps/macos
+    cd apps
     if [[ $PROFILE == release ]]; then
         SG_PROFILE=release swift build -c release
     else
@@ -45,7 +45,7 @@ echo "==> packaging ServerGlass.app"
 APP="target/ServerGlass.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "apps/macos/.build/$PROFILE/ServerGlass" "$APP/Contents/MacOS/ServerGlass"
+cp "apps/.build/$PROFILE/ServerGlass" "$APP/Contents/MacOS/ServerGlass"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
