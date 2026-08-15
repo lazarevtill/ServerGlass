@@ -24,8 +24,16 @@ Every other number is one tap away.
 All of them share one Rust core: the collectors, the scheduler, the rate maths, the health
 verdicts, the wording and the number formatting are written once.
 
-**234 tests**, including live runs against Debian and Alpine SSH fixtures, and a regression test
-asserting that a full refresh costs exactly one network round trip.
+**234 Rust tests**, including live runs against Debian and Alpine SSH fixtures and a regression
+test asserting that a full refresh costs exactly one network round trip — plus **7 Swift** and
+**7 Kotlin** tests over the parts those layers own: how a host is stored, what stays out of the
+record, and what an unreadable file costs.
+
+```bash
+cargo test --workspace          # core
+swift test --package-path apps  # Apple storage and vault
+(cd apps/android && gradle :app:testDebugUnitTest)
+```
 
 ## Install
 
@@ -280,6 +288,8 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
 
 - Setup still assumes someone who knows what a hostname and an SSH key are. The *reading*
   experience is written for a non-technical person; the *adding* experience is not yet.
+- CI runs the Rust suite only. The Swift and Kotlin tests exist and pass locally, but no macOS or
+  Android runner is configured to run them.
 - Sensor parsing is covered by tests against captured `hwmon` layouts, but no machine available
   here exposes hwmon chips, so the sweep has not been run against real sensor hardware.
 - CI builds and tests the Rust core only. No macOS or Android runner is configured, so the apps

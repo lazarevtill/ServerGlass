@@ -1731,21 +1731,21 @@ dependencies = [
 
 [[package]]
 name = "sg-bindgen"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "uniffi",
 ]
 
 [[package]]
 name = "sg-collect"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "sg-model",
 ]
 
 [[package]]
 name = "sg-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "sg-collect",
  "sg-model",
@@ -1756,7 +1756,7 @@ dependencies = [
 
 [[package]]
 name = "sg-ffi"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "sg-core",
  "sg-model",
@@ -1769,14 +1769,14 @@ dependencies = [
 
 [[package]]
 name = "sg-model"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "sg-transport"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "russh",
  "sg-model",

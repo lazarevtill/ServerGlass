@@ -92,7 +92,9 @@ struct HostDetailView: View {
             // A grid, not a row: six rings do not fit across a phone, and on a foldable the same
             // view has to work at both widths without a second layout existing.
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 92, maximum: 170), spacing: 4)],
+                // `.top`: the uptime tile has no quantity beneath it, and a centred row hung its
+                // label a line lower than every other label in the same row.
+                columns: [GridItem(.adaptive(minimum: 92, maximum: 170), spacing: 4, alignment: .top)],
                 spacing: 12
             ) {
                 if let cpu = snapshot.gauge("cpu_usage") {

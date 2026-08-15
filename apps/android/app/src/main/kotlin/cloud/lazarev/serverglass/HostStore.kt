@@ -65,43 +65,10 @@ class HostStore(context: Context) {
         context.getSharedPreferences("sg.secrets.plain", Context.MODE_PRIVATE)
     }
 
-    fun load(): List<SavedHost> {
-        val raw = config.getString(KEY, null) ?: return emptyList()
-        return runCatching {
-            val array = JSONArray(raw)
-            (0 until array.length()).map { index ->
-                val o = array.getJSONObject(index)
-                SavedHost(
-                    id = o.getString("id"),
-                    address = o.getString("address"),
-                    port = o.getInt("port").toUShort(),
-                    user = o.getString("user"),
-                    authKind = o.getString("authKind"),
-                    keyPath = o.optString("keyPath").ifEmpty { null },
-                    hostKeyPolicy = o.getString("hostKeyPolicy"),
-                    refreshMs = o.getLong("refreshMs").toULong(),
-                )
-            }
-        }.getOrDefault(emptyList())
-    }
+    fun load(): List<SavedHost> = decode(config.getString(KEY, null))
 
     fun save(hosts: List<SavedHost>) {
-        val array = JSONArray()
-        hosts.forEach { host ->
-            array.put(
-                JSONObject().apply {
-                    put("id", host.id)
-                    put("address", host.address)
-                    put("port", host.port.toInt())
-                    put("user", host.user)
-                    put("authKind", host.authKind)
-                    put("keyPath", host.keyPath ?: "")
-                    put("hostKeyPolicy", host.hostKeyPolicy)
-                    put("refreshMs", host.refreshMs.toLong())
-                },
-            )
-        }
-        config.edit().putString(KEY, array.toString()).apply()
+        config.edit().putString(KEY, encode(hosts)).apply()
     }
 
     /** Which secret. A host can have both — a pasted key *and* the passphrase protecting it. */
@@ -138,8 +105,60 @@ class HostStore(context: Context) {
         secrets.edit().remove(id).remove(id + Kind.KEY_TEXT.suffix).apply()
     }
 
-    private companion object {
-        const val KEY = "hosts.v1"
-        const val SHOW_TECHNICAL = "show_technical"
+    companion object {
+        private const val KEY = "hosts.v1"
+        private const val SHOW_TECHNICAL = "show_technical"
+
+        /**
+         * The stored form of the host list.
+         *
+         * Split out from the preferences plumbing so it can be tested without an Android runtime.
+         * This is the format that has to survive an app upgrade — a field silently dropped here
+         * loses somebody's servers — and it had no test at all.
+         */
+        fun encode(hosts: List<SavedHost>): String {
+            val array = JSONArray()
+            hosts.forEach { host ->
+                array.put(
+                    JSONObject().apply {
+                        put("id", host.id)
+                        put("address", host.address)
+                        put("port", host.port.toInt())
+                        put("user", host.user)
+                        put("authKind", host.authKind)
+                        put("keyPath", host.keyPath ?: "")
+                        put("hostKeyPolicy", host.hostKeyPolicy)
+                        put("refreshMs", host.refreshMs.toLong())
+                    },
+                )
+            }
+            return array.toString()
+        }
+
+        /**
+         * Anything unreadable yields an empty list rather than a crash.
+         *
+         * A record written by a future version, or a file truncated by a device losing power
+         * mid-write, must cost the user their list — not the ability to open the app at all.
+         */
+        fun decode(raw: String?): List<SavedHost> {
+            if (raw.isNullOrEmpty()) return emptyList()
+            return runCatching {
+                val array = JSONArray(raw)
+                (0 until array.length()).map { index ->
+                    val o = array.getJSONObject(index)
+                    SavedHost(
+                        id = o.getString("id"),
+                        address = o.getString("address"),
+                        port = o.getInt("port").toUShort(),
+                        user = o.getString("user"),
+                        authKind = o.getString("authKind"),
+                        keyPath = o.optString("keyPath").ifEmpty { null },
+                        hostKeyPolicy = o.getString("hostKeyPolicy"),
+                        refreshMs = o.getLong("refreshMs").toULong(),
+                    )
+                }
+            }.getOrDefault(emptyList())
+        }
     }
 }

@@ -25,6 +25,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.alpha
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -752,18 +757,46 @@ private fun HeadlineRing(gauge: MetricGauge, caption: String, detail: String?) {
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(gauge.label, color = Theme.primary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-            detail?.let {
-                Text(
-                    it,
-                    color = Theme.secondary,
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    textAlign = TextAlign.Center,
-                )
-            }
+            detail?.let { ShrinkingText(it) }
         }
     }
+}
+
+/**
+ * A caption that shrinks to fit rather than losing its end.
+ *
+ * SwiftUI's `minimumScaleFactor(0.7)` in a composable. Without it the narrowest overview column
+ * ellipsised — "530.5 MiB / 7.8" — which is worse than small text, because a truncated quantity
+ * reads as a real one. Shrinks to 70% and no further; past that it would be unreadable and the
+ * column is simply too narrow.
+ */
+@Composable
+private fun ShrinkingText(text: String) {
+    val full = 9.sp
+    var size by remember(text) { mutableStateOf(full) }
+    var settled by remember(text) { mutableStateOf(false) }
+
+    Text(
+        text,
+        color = Theme.secondary,
+        fontSize = size,
+        fontFamily = FontFamily.Monospace,
+        maxLines = 1,
+        softWrap = false,
+        textAlign = TextAlign.Center,
+        // Drawn invisibly until it fits, so the reader never sees it snap from one size to
+        // another on the first frame.
+        modifier = Modifier.alpha(if (settled) 1f else 0f),
+        onTextLayout = { layout ->
+            if (!settled) {
+                if (layout.hasVisualOverflow && size > full * 0.7f) {
+                    size = size * 0.92f
+                } else {
+                    settled = true
+                }
+            }
+        },
+    )
 }
 
 /** Mirrors `CapacityBar`: 6dp by default, never thinner than 2dp of fill. */

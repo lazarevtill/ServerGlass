@@ -12,8 +12,8 @@ android {
         applicationId = "cloud.lazarev.serverglass"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.2.0"
     }
 
     // Android will not install an unsigned APK at all — unlike macOS, there is no unsigned
@@ -82,6 +82,11 @@ dependencies {
     implementation("androidx.compose.material3:material3-window-size-class")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+
+    // The record format is pure Kotlin plus org.json, so it is tested on the JVM rather than on a
+    // device: a test that needs an emulator is a test that does not run.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 
     // Passwords and passphrases, encrypted with a key held in the Android Keystore.
     implementation("androidx.security:security-crypto:1.1.0-alpha06")

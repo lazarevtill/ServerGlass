@@ -58,5 +58,15 @@ let package = Package(
             dependencies: ["ServerGlassUI"],
             path: "macos/Sources/ServerGlassApp"
         ),
+
+        // The Swift layer had no tests at all. Everything it owns that is not a view — how a host
+        // is stored, what an edit changes, what a blank credential field means — was verified only
+        // by a person driving a simulator, which is exactly how the long-press regression reached
+        // a device.
+        .testTarget(
+            name: "ServerGlassUITests",
+            dependencies: ["ServerGlassUI"],
+            path: "shared/ServerGlassUITests"
+        ),
     ]
 )

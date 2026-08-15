@@ -7,12 +7,12 @@ public struct ContentView: View {
     @EnvironmentObject private var model: CoreModel
     @State private var showingAddHost = false
     /// The host being edited, if any. Identified by its live target id.
-    @State private var editingHost: String?
+    @State private var editingHost: HostTarget?
     /// Simple by default. Someone who needs the technical view will find it and it is remembered;
     /// someone who does not should never be shown a load average.
     @AppStorage("sg.showTechnicalDetails") private var showTechnical = false
     /// Which host is showing its command runner, keyed by target id.
-    @State private var commandHost: String?
+    @State private var commandHost: HostTarget?
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -20,12 +20,12 @@ public struct ContentView: View {
     public var body: some View {
         layout
             .sheet(isPresented: $showingAddHost) { AddHostSheet() }
-            .sheet(item: $editingHost) { id in
-                if let saved = model.saved(for: id) {
-                    AddHostSheet(editing: saved, targetId: id)
+            .sheet(item: $editingHost) { target in
+                if let saved = model.saved(for: target.id) {
+                    AddHostSheet(editing: saved, targetId: target.id)
                 }
             }
-            .environment(\.editHost, { editingHost = $0 })
+            .environment(\.editHost, { editingHost = HostTarget(id: $0) })
             // Errors that belong to the app rather than to one host — a Keychain refusal, a
             // target that would not start. Without this they were set and never shown.
             .alert(
@@ -38,8 +38,8 @@ public struct ContentView: View {
             } message: {
                 Text(model.lastError ?? "")
             }
-            .sheet(item: $commandHost) { id in
-                if let host = model.host(id: id) {
+            .sheet(item: $commandHost) { target in
+                if let host = model.host(id: target.id) {
                     NavigationStack {
                         CommandView(host: host)
                             .navigationTitle("Run a command")
@@ -135,13 +135,13 @@ public struct ContentView: View {
                             // Swiping is the iOS idiom but it is invisible; the context menu is
                             // how someone who has never swiped a row finds these at all.
                             .contextMenu {
-                                Button("Edit…") { editingHost = host.id }
+                                Button("Edit…") { editingHost = HostTarget(id: host.id) }
                                 Button("Remove", role: .destructive) {
                                     model.removeHost(id: host.id)
                                 }
                             }
                             .swipeActions(edge: .leading) {
-                                Button("Edit") { editingHost = host.id }.tint(Theme.info)
+                                Button("Edit") { editingHost = HostTarget(id: host.id) }.tint(Theme.info)
                             }
                     }
                     .onDelete { offsets in
@@ -169,7 +169,7 @@ public struct ContentView: View {
                 .toolbar {
                     ToolbarItem(placement: .automatic) {
                         Button {
-                            commandHost = host.id
+                            commandHost = HostTarget(id: host.id)
                         } label: {
                             Label("Run a command", systemImage: "terminal")
                         }
@@ -450,7 +450,11 @@ extension EnvironmentValues {
     }
 }
 
-/// `sheet(item:)` needs an `Identifiable`, and a host id is already unique.
-extension String: @retroactive Identifiable {
-    public var id: String { self }
+/// The host a sheet is about.
+///
+/// `sheet(item:)` needs an `Identifiable`, which used to be supplied by conforming `String` itself
+/// — a conformance on every string in the app, retroactive to a type nobody here owns, to serve
+/// two sheets. A named box costs one line and claims nothing.
+struct HostTarget: Identifiable, Equatable {
+    let id: String
 }
