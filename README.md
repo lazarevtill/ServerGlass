@@ -24,7 +24,7 @@ Every other number is one tap away.
 All of them share one Rust core: the collectors, the scheduler, the rate maths, the health
 verdicts, the wording and the number formatting are written once.
 
-**181 tests**, including live runs against Debian and Alpine SSH fixtures, and a regression test
+**194 tests**, including live runs against Debian and Alpine SSH fixtures, and a regression test
 asserting that a full refresh costs exactly one network round trip.
 
 ## Why this exists
@@ -127,6 +127,12 @@ The app opens on the plain-language summary. **Show every reading** switches to 
 dashboard — per-core CPU, memory breakdown, per-interface traffic, per-device disk I/O,
 filesystems, sockets and TCP — and the choice is remembered.
 
+Where the kernel supports it (4.20+ with `CONFIG_PSI`), ServerGlass reads
+[Pressure Stall Information](https://docs.kernel.org/accounting/psi.html) and prefers it for the
+health verdict. A host can sit at 100% CPU and be perfectly healthy — that is what a server is for
+— while a host at 30% CPU whose tasks stall on I/O a third of the time is genuinely unwell. Only
+pressure tells those apart, so "Waiting on storage" outranks any utilisation percentage.
+
 ## Development
 
 ```bash
@@ -165,7 +171,7 @@ adb shell am start -n cloud.lazarev.serverglass/.MainActivity \
 |---|---|
 | `crates/sg-model` | Domain types and the `Source` trait. No I/O, no async, `serde` only. |
 | `crates/sg-transport` | russh client, the batched shell protocol, capability detection. |
-| `crates/sg-collect` | Collectors: CPU, memory, load, filesystems, disk I/O, network, TCP, processes. |
+| `crates/sg-collect` | Collectors: CPU, memory, load, pressure, filesystems, disk I/O, network, TCP, processes. |
 | `crates/sg-core` | Request merging, rate derivation, the live store, the per-target runtime. |
 | `crates/sg-ffi` | UniFFI surface, UI-shaped view models, and the plain-language layer. |
 | `crates/sg-bindgen` | Binding generator, separate so `clap` never reaches the shipped library. |

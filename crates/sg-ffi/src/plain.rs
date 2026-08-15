@@ -32,6 +32,14 @@ pub struct HostHealth {
 const NEARLY_FULL: f64 = 90.0;
 const FILLING_UP: f64 = 80.0;
 const WORKING_HARD: f64 = 85.0;
+/// Share of wall-clock time tasks spent stalled before it is worth saying so.
+///
+/// Pressure is a better answer to "is this machine struggling" than any utilisation percentage.
+/// A host can sit at 100% CPU and be perfectly healthy — that is what a server is *for* — while a
+/// host at 30% CPU whose tasks are stalled on I/O a third of the time is genuinely unwell. These
+/// thresholds are deliberately conservative: brief pressure is normal on any busy machine.
+const STALLING: f64 = 20.0;
+const STALLING_BADLY: f64 = 40.0;
 
 /// Assess a host from its headline gauges.
 ///
@@ -110,6 +118,33 @@ pub fn assess(state: &ConnectionState, gauges: &[MetricGauge], has_data: bool) -
         }
     }
 
+    // Checked before the utilisation thresholds: "waiting on storage" explains a slow machine,
+    // where "the processor is 88% busy" merely describes one.
+    if let Some(io) = value("pressure_io_60s").or_else(|| value("pressure_io")) {
+        if io >= STALLING_BADLY {
+            return health(
+                "problem",
+                "Waiting on storage",
+                format!(
+                    "Tasks spent {io:.0}% of the last minute waiting for the disk. That is what a \
+                     machine feels like when it has run out of I/O, not out of processor."
+                ),
+            );
+        }
+    }
+    if let Some(memory) = value("pressure_memory_full").or_else(|| value("pressure_memory")) {
+        if memory >= STALLING {
+            return health(
+                "problem",
+                "Struggling for memory",
+                format!(
+                    "Everything on the machine stopped and waited for memory {memory:.0}% of the \
+                     time. Freeing some, or adding more, would make it noticeably faster."
+                ),
+            );
+        }
+    }
+
     if let Some(disk) = value("disk_usage") {
         if disk >= FILLING_UP {
             return health(
@@ -125,6 +160,18 @@ pub fn assess(state: &ConnectionState, gauges: &[MetricGauge], has_data: bool) -
                 "busy",
                 "Memory is under pressure",
                 format!("Memory is {memory:.0}% used."),
+            );
+        }
+    }
+    if let Some(cpu) = value("pressure_cpu_60s").or_else(|| value("pressure_cpu")) {
+        if cpu >= STALLING {
+            return health(
+                "busy",
+                "Work is queueing up",
+                format!(
+                    "Something was waiting its turn for the processor {cpu:.0}% of the last \
+                     minute. Busy is fine; queueing means requests are being made to wait."
+                ),
             );
         }
     }
@@ -301,6 +348,89 @@ mod tests {
             "no sizes in {:?}",
             health.detail
         );
+    }
+
+    /// A host can sit at 100% CPU and be perfectly healthy — that is what a server is for. What
+    /// makes a machine *feel* broken is tasks waiting, and pressure measures exactly that.
+    #[test]
+    fn stalling_outranks_high_utilisation() {
+        let health = assess(
+            &ConnectionState::Online,
+            &[
+                gauge("cpu_usage", 30.0),
+                gauge("mem_usage", 40.0),
+                gauge("disk_usage", 40.0),
+                gauge("pressure_io_60s", 55.0),
+            ],
+            true,
+        );
+        assert_eq!(health.headline, "Waiting on storage");
+        assert!(health.detail.contains("55%"), "{}", health.detail);
+    }
+
+    #[test]
+    fn memory_stalling_is_reported_even_when_usage_looks_fine() {
+        let health = assess(
+            &ConnectionState::Online,
+            &[
+                gauge("mem_usage", 55.0),
+                gauge("pressure_memory_full", 31.0),
+            ],
+            true,
+        );
+        assert_eq!(health.headline, "Struggling for memory");
+    }
+
+    /// Busy is not the same as queueing, and the wording has to keep them apart.
+    #[test]
+    fn cpu_queueing_reads_differently_from_cpu_being_busy() {
+        let queueing = assess(
+            &ConnectionState::Online,
+            &[gauge("cpu_usage", 40.0), gauge("pressure_cpu_60s", 25.0)],
+            true,
+        );
+        assert_eq!(queueing.headline, "Work is queueing up");
+
+        // Fully loaded but nothing waiting: busy, not unwell.
+        let busy = assess(
+            &ConnectionState::Online,
+            &[gauge("cpu_usage", 92.0), gauge("pressure_cpu_60s", 1.0)],
+            true,
+        );
+        assert_eq!(busy.headline, "Working very hard");
+    }
+
+    /// Brief pressure is normal on any busy machine; only sustained stalling is worth saying.
+    #[test]
+    fn small_amounts_of_pressure_are_not_reported() {
+        let health = assess(
+            &ConnectionState::Online,
+            &[
+                gauge("cpu_usage", 10.0),
+                gauge("mem_usage", 20.0),
+                gauge("disk_usage", 20.0),
+                gauge("pressure_io_60s", 4.0),
+                gauge("pressure_cpu_60s", 3.0),
+            ],
+            true,
+        );
+        assert_eq!(health.level, "ok");
+    }
+
+    /// Kernels before 4.20, and any build without CONFIG_PSI, report nothing here.
+    #[test]
+    fn a_host_without_psi_still_gets_a_verdict() {
+        let health = assess(
+            &ConnectionState::Online,
+            &[
+                gauge("cpu_usage", 4.0),
+                gauge("mem_usage", 20.0),
+                gauge("disk_usage", 30.0),
+            ],
+            true,
+        );
+        assert_eq!(health.level, "ok");
+        assert_eq!(health.headline, "Everything looks good");
     }
 
     #[test]

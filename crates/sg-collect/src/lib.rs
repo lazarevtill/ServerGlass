@@ -21,6 +21,7 @@ pub mod filesystem;
 pub mod load;
 pub mod memory;
 pub mod network;
+pub mod pressure;
 pub mod process;
 pub mod tcp;
 
@@ -35,6 +36,7 @@ pub use filesystem::FilesystemSource;
 pub use load::LoadSource;
 pub use memory::MemorySource;
 pub use network::NetworkSource;
+pub use pressure::PressureSource;
 pub use process::ProcessSource;
 pub use tcp::TcpSource;
 
@@ -48,6 +50,7 @@ pub fn builtin_sources() -> Vec<Box<dyn Source>> {
         Box::new(DiskIoSource::default()),
         Box::new(NetworkSource::default()),
         Box::new(TcpSource::default()),
+        Box::new(PressureSource::default()),
         Box::new(ProcessSource::default()),
     ]
 }
@@ -196,8 +199,12 @@ mod tests {
         }
 
         let unique: HashSet<_> = all.iter().map(|r| r.id()).collect();
+        // A ceiling, not a target. Every entry is one more thing concatenated into the same
+        // single round trip, so the cost of crossing this is bytes rather than latency — but an
+        // unbounded request set is how a one-round-trip design quietly turns into a slow one.
+        // Raise it deliberately when a collector earns its place, never to make a test pass.
         assert!(
-            unique.len() <= 12,
+            unique.len() <= 16,
             "a refresh would fetch {} distinct things: {all:#?}",
             unique.len()
         );
