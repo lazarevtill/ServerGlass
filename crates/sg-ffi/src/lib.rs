@@ -1,0 +1,340 @@
+//! UniFFI bindings for the ServerGlass core.
+//!
+//! The surface is deliberately narrow: add a target, start it, read a snapshot. All parsing,
+//! scheduling, rate derivation and connection handling stay in Rust, so the macOS, Windows, Linux
+//! and Android front-ends share every line of it.
+//!
+//! # Snapshot polling, not an event stream
+//!
+//! Each target runs a background task that ticks on its own interval and publishes a finished
+//! [`TargetSnapshot`]. The UI calls [`ServerGlass::snapshot`] on a display timer and renders what
+//! it gets. At a one-second refresh this is indistinguishable from a push stream, needs no
+//! callback interface on four platforms, and cannot deadlock the tick loop behind a slow UI
+//! thread. A push-based event stream is the natural next step once the terminal lands, which does
+//! need one — a terminal cannot be polled.
+
+mod view;
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
+
+use sg_core::{default_sources, TargetRuntime, TargetState};
+use sg_model::{now_ms, TargetId};
+
+pub use view::{
+    format_uptime, format_value, ConnectionState, DetailGroup, EntityView, MetricGauge,
+    TargetConfig, TargetSnapshot,
+};
+use view::{connection_spec, entity_view, host_details, host_gauges};
+
+uniffi::setup_scaffolding!();
+
+/// Anything the UI can be told about a failure.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum SgError {
+    #[error("no such target: {id}")]
+    UnknownTarget { id: String },
+    #[error("{message}")]
+    Connection { message: String, recoverable: bool },
+    #[error("internal error: {message}")]
+    Internal { message: String },
+}
+
+/// One monitored host and its background poller.
+struct Target {
+    config: TargetConfig,
+    snapshot: Arc<RwLock<TargetSnapshot>>,
+    /// Dropping this aborts the poll loop.
+    task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+/// The core, as the UIs see it.
+#[derive(uniffi::Object)]
+pub struct ServerGlass {
+    runtime: tokio::runtime::Runtime,
+    targets: RwLock<HashMap<String, Arc<Target>>>,
+    next_id: Mutex<u64>,
+}
+
+#[uniffi::export]
+impl ServerGlass {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        // A dedicated multi-threaded runtime: the UI thread must never be the thing driving SSH.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .thread_name("serverglass")
+            .build()
+            .expect("tokio runtime");
+
+        Arc::new(ServerGlass {
+            runtime,
+            targets: RwLock::new(HashMap::new()),
+            next_id: Mutex::new(0),
+        })
+    }
+
+    /// Register a host. Does not connect; call [`ServerGlass::start`] for that.
+    pub fn add_target(&self, config: TargetConfig) -> String {
+        let id = {
+            let mut next = self.next_id.lock().expect("id lock");
+            *next += 1;
+            format!("t{}", *next)
+        };
+
+        let snapshot = Arc::new(RwLock::new(TargetSnapshot::placeholder(
+            &id,
+            &config.host,
+            ConnectionState::Idle,
+        )));
+
+        self.targets.write().expect("targets lock").insert(
+            id.clone(),
+            Arc::new(Target { config, snapshot, task: Mutex::new(None) }),
+        );
+        id
+    }
+
+    /// Connect and begin refreshing. Returns immediately; watch the snapshot for progress.
+    pub fn start(&self, target_id: String) -> Result<(), SgError> {
+        let target = self.target(&target_id)?;
+
+        let mut slot = target.task.lock().expect("task lock");
+        if slot.as_ref().is_some_and(|t| !t.is_finished()) {
+            return Ok(());
+        }
+
+        let handle = self.runtime.spawn(poll_loop(target_id, Arc::clone(&target)));
+        *slot = Some(handle);
+        Ok(())
+    }
+
+    /// Stop refreshing and drop the connection.
+    pub fn stop(&self, target_id: String) -> Result<(), SgError> {
+        let target = self.target(&target_id)?;
+        if let Some(handle) = target.task.lock().expect("task lock").take() {
+            handle.abort();
+        }
+        let mut snapshot = target.snapshot.write().expect("snapshot lock");
+        snapshot.state = ConnectionState::Idle;
+        Ok(())
+    }
+
+    pub fn remove_target(&self, target_id: String) -> Result<(), SgError> {
+        self.stop(target_id.clone())?;
+        self.targets.write().expect("targets lock").remove(&target_id);
+        Ok(())
+    }
+
+    /// The most recent completed refresh. Cheap enough to call on a display timer.
+    pub fn snapshot(&self, target_id: String) -> Result<TargetSnapshot, SgError> {
+        let target = self.target(&target_id)?;
+        let snapshot = target.snapshot.read().expect("snapshot lock").clone();
+        Ok(snapshot)
+    }
+
+    pub fn target_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> =
+            self.targets.read().expect("targets lock").keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// Format a value the way every ServerGlass UI formats it.
+    pub fn format(&self, value: f64, unit_suffix: String, binary_scaled: bool) -> String {
+        format_value(value, &unit_suffix, binary_scaled)
+    }
+
+    pub fn format_duration(&self, seconds: f64) -> String {
+        format_uptime(seconds)
+    }
+}
+
+impl ServerGlass {
+    fn target(&self, id: &str) -> Result<Arc<Target>, SgError> {
+        self.targets
+            .read()
+            .expect("targets lock")
+            .get(id)
+            .cloned()
+            .ok_or_else(|| SgError::UnknownTarget { id: id.to_string() })
+    }
+}
+
+/// Connect, then refresh forever, republishing a snapshot after each tick.
+async fn poll_loop(target_id: String, target: Arc<Target>) {
+    let publish = |state: ConnectionState| {
+        let mut snapshot = target.snapshot.write().expect("snapshot lock");
+        snapshot.state = state;
+    };
+
+    let interval = std::time::Duration::from_millis(target.config.refresh_ms.clamp(250, 60_000));
+
+    loop {
+        publish(ConnectionState::Connecting);
+
+        let mut runtime = TargetRuntime::new(
+            TargetId::new(target_id.clone()),
+            connection_spec(&target.config),
+            default_sources(),
+        );
+
+        if let Err(error) = runtime.connect().await {
+            let recoverable = error.is_transient();
+            publish(ConnectionState::Failed { message: error.to_string(), recoverable });
+            if !recoverable {
+                // Bad credentials or a changed host key: retrying cannot fix it, and hammering
+                // the host is how accounts get locked out.
+                return;
+            }
+            tokio::time::sleep(sg_core::backoff_for(1)).await;
+            continue;
+        }
+
+        // The first tick after connecting carries no counter-derived series: a rate needs two
+        // readings. Publishing it would render a status grid without its CPU and network tiles,
+        // which then appear one refresh later and shove every other tile sideways. Holding the
+        // first tick back costs one refresh interval of "Collecting…" and means the grid is
+        // complete and stable the moment it appears.
+        let mut published_first = false;
+
+        loop {
+            let tick_started = tokio::time::Instant::now();
+            match runtime.tick().await {
+                Ok(tick) => {
+                    if published_first {
+                        let snapshot = build_snapshot(&target_id, &runtime, &tick);
+                        *target.snapshot.write().expect("snapshot lock") = snapshot;
+                    } else {
+                        published_first = true;
+                        publish(ConnectionState::Online);
+                    }
+                }
+                Err(_) => {
+                    // `tick` has already moved the runtime into Reconnecting or Failed; publish
+                    // that and fall out to re-establish the session.
+                    publish(ConnectionState::from(runtime.state()));
+                    break;
+                }
+            }
+
+            // Subtract the time the tick took, so a slow host produces a steady cadence rather
+            // than drifting further behind on every refresh.
+            let elapsed = tick_started.elapsed();
+            tokio::time::sleep(interval.saturating_sub(elapsed)).await;
+        }
+
+        if let TargetState::Failed { recoverable: false, .. } = runtime.state() {
+            return;
+        }
+        tokio::time::sleep(sg_core::backoff_for(1)).await;
+    }
+}
+
+fn build_snapshot(
+    target_id: &str,
+    runtime: &TargetRuntime,
+    tick: &sg_core::Tick,
+) -> TargetSnapshot {
+    let store = runtime.store();
+    let caps = runtime.capabilities();
+    let host = runtime.host_entity();
+
+    let (gauges, detail_groups, entities) = match host {
+        Some(host) => (
+            host_gauges(store, &host.id),
+            host_details(store, &host.id),
+            store.children_of(&host.id).into_iter().map(|e| entity_view(e, store)).collect(),
+        ),
+        None => (Vec::new(), Vec::new(), Vec::new()),
+    };
+
+    TargetSnapshot {
+        target_id: target_id.to_string(),
+        state: ConnectionState::from(runtime.state()),
+        display_name: host.map(|h| h.display.clone()).unwrap_or_default(),
+        distro: caps.map(|c| c.distro.clone()).unwrap_or_default(),
+        kernel: caps.map(|c| c.kernel.clone()).unwrap_or_default(),
+        arch: caps.map(|c| c.arch.clone()).unwrap_or_default(),
+        cpu_count: caps.map(|c| c.cpu_count).unwrap_or(0),
+        gauges,
+        detail_groups,
+        entities,
+        source_errors: tick.errors.iter().map(ToString::to_string).collect(),
+        last_update_ms: now_ms(),
+        round_trips: runtime.round_trips(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(host: &str) -> TargetConfig {
+        TargetConfig {
+            host: host.into(),
+            port: 22,
+            user: "root".into(),
+            auth_kind: "agent".into(),
+            key_path: None,
+            secret: None,
+            host_key_policy: "strict".into(),
+            refresh_ms: 1000,
+        }
+    }
+
+    #[test]
+    fn targets_get_distinct_ids_and_a_placeholder_snapshot() {
+        let core = ServerGlass::new();
+        let a = core.add_target(config("host-a"));
+        let b = core.add_target(config("host-b"));
+
+        assert_ne!(a, b);
+        assert_eq!(core.target_ids(), vec![a.clone(), b.clone()]);
+
+        // A target that has never connected still renders, rather than the UI special-casing nil.
+        let snapshot = core.snapshot(a).unwrap();
+        assert_eq!(snapshot.state, ConnectionState::Idle);
+        assert_eq!(snapshot.display_name, "host-a");
+        assert!(snapshot.gauges.is_empty());
+    }
+
+    #[test]
+    fn unknown_targets_are_reported_rather_than_panicking() {
+        let core = ServerGlass::new();
+        assert!(matches!(
+            core.snapshot("nope".into()),
+            Err(SgError::UnknownTarget { .. })
+        ));
+        assert!(matches!(core.start("nope".into()), Err(SgError::UnknownTarget { .. })));
+        assert!(matches!(core.stop("nope".into()), Err(SgError::UnknownTarget { .. })));
+    }
+
+    #[test]
+    fn removing_a_target_stops_it_and_forgets_it() {
+        let core = ServerGlass::new();
+        let id = core.add_target(config("host-a"));
+
+        core.remove_target(id.clone()).unwrap();
+        assert!(core.target_ids().is_empty());
+        assert!(matches!(core.snapshot(id), Err(SgError::UnknownTarget { .. })));
+    }
+
+    #[test]
+    fn stopping_an_idle_target_is_harmless() {
+        let core = ServerGlass::new();
+        let id = core.add_target(config("host-a"));
+        core.stop(id.clone()).unwrap();
+        core.stop(id.clone()).unwrap();
+        assert_eq!(core.snapshot(id).unwrap().state, ConnectionState::Idle);
+    }
+
+    #[test]
+    fn formatting_is_exposed_so_every_ui_agrees() {
+        let core = ServerGlass::new();
+        assert_eq!(core.format(1536.0, "B".into(), true), "1.5 KiB");
+        assert_eq!(core.format(42.0, "%".into(), false), "42.0%");
+        assert_eq!(core.format_duration(90_000.0), "1d 1h");
+    }
+}

@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sg-model",
+    "crates/sg-transport",
+    "crates/sg-collect",
+    "crates/sg-core",
+    "crates/sg-ffi",
+    "crates/sg-bindgen",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/lazarevtill/ServerGlass"
+
+[workspace.dependencies]
+sg-model = { path = "crates/sg-model" }
+sg-transport = { path = "crates/sg-transport" }
+sg-collect = { path = "crates/sg-collect" }
+sg-core = { path = "crates/sg-core" }
+
+anyhow = "1.0"
+async-trait = "0.1"
+russh = "0.62"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uniffi = "0.32"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

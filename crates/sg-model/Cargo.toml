@@ -1,0 +1,10 @@
+[package]
+name = "sg-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Core domain types for ServerGlass: entities, samples, series, units, capabilities."
+
+[dependencies]
+serde = { workspace = true }

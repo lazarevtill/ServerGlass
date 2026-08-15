@@ -1,0 +1,24 @@
+# GNU coreutils target.
+FROM debian:12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssh-server iproute2 procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd /root/.ssh \
+    && chmod 700 /root/.ssh
+
+COPY id_test.pub /root/.ssh/authorized_keys
+RUN chmod 600 /root/.ssh/authorized_keys
+
+# Key-only root login. Host keys are generated at build time and thrown away with the image.
+RUN sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config \
+    # The test suite runs in parallel and opens many sessions to this one container; the stock
+    # MaxStartups of 10 makes tests fail on connect for a reason that has nothing to do with them.
+    && printf 'MaxStartups 200:30:400\nMaxSessions 200\n' >> /etc/ssh/sshd_config \
+    && ssh-keygen -A
+
+EXPOSE 22
+# /run is a tmpfs (the container runs with a read-only root, to prove ServerGlass writes nothing
+# to a monitored host), so sshd's privilege separation directory has to be recreated at start.
+CMD ["sh", "-c", "mkdir -p /run/sshd && exec /usr/sbin/sshd -D -e"]

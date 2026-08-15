@@ -1,0 +1,8 @@
+Filesystem     1024-blocks     Used Available Capacity Mounted on
+overlay          311492608 13976112 297516496       5% /
+tmpfs                65536        0     65536       0% /dev
+shm                4098048        0   4098048       0% /dev/shm
+tmpfs              4098440        0   4098440       0% /tmp
+tmpfs              4098440        8   4098432       1% /run
+/dev/vdb1        311492608 13976112 297516496       5% /etc/hosts
+tmpfs                    4        0         4       0% /proc/asound

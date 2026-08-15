@@ -1,0 +1,14 @@
+Filesystem           1024-blocks    Used Available Capacity Mounted on
+overlay              311492608  13976112 297516496   4% /
+tmpfs                    65536         0     65536   0% /dev
+shm                    4098048         0   4098048   0% /dev/shm
+tmpfs                  4098440         4   4098436   0% /run
+tmpfs                  4098440         0   4098440   0% /tmp
+/dev/vdb1            311492608  13976112 297516496   4% /etc/resolv.conf
+/dev/vdb1            311492608  13976112 297516496   4% /etc/hostname
+/dev/vdb1            311492608  13976112 297516496   4% /etc/hosts
+tmpfs                        4         0         4   0% /proc/asound
+tmpfs                    65536         0     65536   0% /proc/interrupts
+tmpfs                    65536         0     65536   0% /proc/keys
+tmpfs                    65536         0     65536   0% /proc/timer_list
+tmpfs                        4         0         4   0% /sys/firmware

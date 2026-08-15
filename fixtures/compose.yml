@@ -1,0 +1,63 @@
+# Disposable SSH targets for developing and testing collectors.
+#
+# Two distributions on purpose: Debian ships GNU coreutils, Alpine ships BusyBox, and their `df`,
+# `ps` and `ls` output differ enough that a parser passing on one routinely fails on the other.
+# Every collector should be exercised against both.
+#
+#   docker compose -f fixtures/compose.yml up -d --build
+#   ssh -i fixtures/id_test -p 2222 root@localhost    # debian
+#   ssh -i fixtures/id_test -p 2223 root@localhost    # alpine
+#
+# Host keys are regenerated on every build, so tests connect with HostKeyPolicy::AcceptAny.
+# Nothing here is reachable off the loopback interface and the key is committed on purpose —
+# it authenticates a throwaway container, not anything that matters.
+
+services:
+  debian:
+    build:
+      context: .
+      dockerfile: Dockerfile.debian
+    container_name: sg-fixture-debian
+    ports:
+      - "127.0.0.1:2222:22"
+    # A monitoring target with a read-only root proves the hard invariant: ServerGlass installs
+    # nothing and writes nothing. sshd needs a writable /run and /tmp, and nothing else.
+    read_only: true
+    tmpfs:
+      - /run:exec,mode=755
+      - /tmp
+    healthcheck:
+      test: ["CMD", "sh", "-c", "netstat -ltn 2>/dev/null | grep -q ':22 ' || ss -ltn | grep -q ':22 '"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  alpine:
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine
+    container_name: sg-fixture-alpine
+    ports:
+      - "127.0.0.1:2223:22"
+    read_only: true
+    tmpfs:
+      - /run:exec,mode=755
+      - /tmp
+    healthcheck:
+      test: ["CMD", "sh", "-c", "netstat -ltn | grep -q ':22 '"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # Gives the targets something to actually report: steady CPU burn and disk traffic, so tests can
+  # assert non-zero rates instead of merely non-null readings.
+  load:
+    image: alpine:3.20
+    container_name: sg-fixture-load
+    command: >
+      sh -c "while :; do
+               dd if=/dev/zero of=/tmp/sg-load bs=1M count=8 2>/dev/null;
+               sync;
+               awk 'BEGIN{for(i=0;i<400000;i++) x+=i*i}';
+               sleep 1;
+             done"

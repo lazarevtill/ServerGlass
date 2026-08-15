@@ -1,0 +1,17 @@
+[package]
+name = "sg-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ServerGlass scheduler: request merging, rate derivation, live sample store, event bus."
+
+[dependencies]
+sg-collect = { workspace = true }
+sg-model = { workspace = true }
+sg-transport = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
