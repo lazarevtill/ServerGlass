@@ -324,8 +324,15 @@ memory.max 536870912
 pids.current 3
 ";
         let cgroups = parse_cgroups(text);
-        assert_eq!(cgroups[0].memory_bytes, 528_482_304, "the raw charge is kept");
-        assert_eq!(cgroups[0].working_set(), 33_554_432, "cache is not the workload");
+        assert_eq!(
+            cgroups[0].memory_bytes, 528_482_304,
+            "the raw charge is kept"
+        );
+        assert_eq!(
+            cgroups[0].working_set(),
+            33_554_432,
+            "cache is not the workload"
+        );
 
         let fraction = cgroups[0].memory_fraction().unwrap();
         assert!(

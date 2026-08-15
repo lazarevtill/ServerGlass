@@ -50,7 +50,10 @@ pub enum SgError {
 // reference to it an "overload resolution ambiguity" that fails the Android build.
 
 /// One command the user asked to run, and where to send the answer.
-type CommandJob = (String, tokio::sync::oneshot::Sender<Result<CommandResult, String>>);
+type CommandJob = (
+    String,
+    tokio::sync::oneshot::Sender<Result<CommandResult, String>>,
+);
 
 /// One monitored host and its background poller.
 struct Target {
@@ -159,7 +162,11 @@ impl ServerGlass {
     /// **Not a terminal.** No PTY is allocated, so anything interactive (`top`, `vim`, a `sudo`
     /// password prompt) will produce nothing useful or hang until the timeout. That limit is the
     /// honest shape of the existing transport, and the UIs say so rather than hiding it.
-    pub fn run_command(&self, target_id: String, command: String) -> Result<CommandResult, SgError> {
+    pub fn run_command(
+        &self,
+        target_id: String,
+        command: String,
+    ) -> Result<CommandResult, SgError> {
         let target = self.target(&target_id)?;
         let command = command.trim().to_string();
         if command.is_empty() {

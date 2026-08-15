@@ -303,7 +303,7 @@ async fn a_pasted_key_authenticates_exactly_like_the_key_file() {
     let mut session = SshSession::connect(spec).await.expect("pasted-key connect");
     let uptime = Request::read("/proc/uptime");
     let responses = session
-        .batch(&[uptime.clone()])
+        .batch(std::slice::from_ref(&uptime))
         .await
         .expect("read over the pasted-key session");
     assert!(responses

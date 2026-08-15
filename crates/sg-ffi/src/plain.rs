@@ -431,14 +431,18 @@ mod tests {
             "could not read the pasted private key: Base64 decoding error: invalid length at 272",
         );
         assert!(said.contains("BEGIN"), "{said}");
-        assert!(!said.contains("Base64"), "the decoder's wording helps nobody: {said}");
+        assert!(
+            !said.contains("Base64"),
+            "the decoder's wording helps nobody: {said}"
+        );
     }
 
     /// A key *file* problem is a different thing to check, and must not be answered with advice
     /// about pasting.
     #[test]
     fn a_key_file_problem_still_talks_about_the_file() {
-        let said = friendly_failure("could not read private key /root/.ssh/id_ed25519: no such file");
+        let said =
+            friendly_failure("could not read private key /root/.ssh/id_ed25519: no such file");
         assert!(said.contains("path"), "{said}");
     }
 
@@ -471,7 +475,10 @@ mod tests {
             true,
         );
         assert_eq!(warm.headline, "Running warm");
-        assert_eq!(warm.level, "busy", "warm is worth mentioning, not worth alarm");
+        assert_eq!(
+            warm.level, "busy",
+            "warm is worth mentioning, not worth alarm"
+        );
     }
 
     /// Temperature is a headline reading but deliberately not a simple-view tile: the simple view

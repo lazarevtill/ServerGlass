@@ -269,14 +269,17 @@ impl Source for SensorSource {
 
         for reading in readings {
             let quantity = reading.quantity();
-            let entity = Entity::child(&ctx.host, EntityKind::Sensor, &reading.display())
+            // Named once: it is the entity's display *and* the series label, and building it twice
+            // invites the two drifting apart.
+            let display = reading.display();
+            let entity = Entity::child(&ctx.host, EntityKind::Sensor, &display)
                 .with_label("chip", &reading.chip);
 
             let mut gauge = SeriesDescriptor::gauge(
                 id,
                 &entity.id,
                 quantity.metric(),
-                &reading.display(),
+                &display,
                 quantity.unit(),
             );
             // The manufacturer's limit is the only honest maximum for a temperature. Without one
@@ -409,7 +412,10 @@ temp|45000||
             .find(|e| e.display == "Composite")
             .expect("the NVMe reading is listed");
         assert_eq!(composite.kind, EntityKind::Sensor);
-        assert_eq!(composite.labels.get("chip").map(String::as_str), Some("nvme"));
+        assert_eq!(
+            composite.labels.get("chip").map(String::as_str),
+            Some("nvme")
+        );
 
         assert_eq!(value_of(&out, "cpu_temp"), Some(47.0));
     }
