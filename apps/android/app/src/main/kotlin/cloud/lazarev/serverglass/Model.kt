@@ -40,6 +40,7 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
         private set
     var selection by mutableStateOf<String?>(null)
     var showTechnical by mutableStateOf(false)
+        private set
 
     /** False when the Keystore was unavailable and secrets fell back to plain preferences. */
     val secretsAreHardwareBacked: Boolean get() = store.secretsAreHardwareBacked
@@ -54,6 +55,7 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
                 poll()
             }
         }
+        showTechnical = store.showTechnical()
         restore()
     }
 
@@ -68,13 +70,16 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
      * The secret is read here rather than held beside the rest of the host, so it exists in memory
      * only for as long as building the config takes.
      */
-    private fun start(saved: HostStore.SavedHost) {
+    private fun start(saved: HostStore.SavedHost, selectWhenReady: Boolean = false) {
         val config = TargetConfig(
             host = saved.address,
             port = saved.port,
             user = saved.user,
             authKind = saved.authKind,
             keyPath = saved.keyPath,
+            // A pasted key is key material, so it comes from the encrypted store rather than the
+            // record, exactly like the passphrase beside it.
+            keyText = store.secret(saved.id, HostStore.Kind.KEY_TEXT),
             secret = if (ephemeralSecrets.containsKey(saved.id)) {
                 ephemeralSecrets[saved.id]
             } else {
@@ -96,6 +101,9 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
             // button with it — out of reach. Two-pane layouts, where the list never leaves the
             // screen, opt into a default selection themselves.
             hosts = hosts + Host(id, "${saved.user}@${saved.address}", core.snapshot(id), saved.id)
+            // Only after an edit, so someone watching a host stays on it rather than being sent
+            // back to the list by their own change.
+            if (selectWhenReady) selection = id
         }
     }
 
@@ -105,6 +113,7 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
         user: String,
         authKind: String,
         keyPath: String?,
+        keyText: String? = null,
         secret: String?,
         trustOnFirstUse: Boolean,
         refreshMs: ULong = 1000UL,
@@ -125,6 +134,7 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
         if (persist) {
             // The secret goes to the encrypted store and nowhere else; the record never carries it.
             store.setSecret(saved.id, secret?.takeIf { it.isNotBlank() })
+            store.setSecret(saved.id, keyText?.takeIf { it.isNotBlank() }, HostStore.Kind.KEY_TEXT)
             store.save(store.load() + saved)
         } else {
             // Not saved, so the secret has to travel in memory rather than through the Keystore.
@@ -149,6 +159,94 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Change a saved host and reconnect it with the new settings.
+     *
+     * Reconnects rather than editing in place because every field here is a connection parameter:
+     * a new address, port or credential cannot apply to a session already established with the old
+     * ones. The record keeps its identifier, so its stored secret is updated rather than orphaned
+     * — which is what remove-then-add would do.
+     *
+     * `secret` and `keyText` are null when the field was left untouched, which is not the same as
+     * an empty string meaning "clear it". An edit form cannot show an existing password, so
+     * treating a blank box as a deliberate erasure would silently discard the credential of
+     * anyone who edited a port number.
+     */
+    fun updateHost(
+        id: String,
+        address: String,
+        port: UShort,
+        user: String,
+        authKind: String,
+        keyPath: String?,
+        keyText: String?,
+        secret: String?,
+        trustOnFirstUse: Boolean,
+        refreshMs: ULong = 1000UL,
+    ) {
+        val savedId = hosts.firstOrNull { it.id == id }?.savedId ?: return
+        val stored = store.load().toMutableList()
+        val index = stored.indexOfFirst { it.id == savedId }
+        if (index < 0) return
+
+        stored[index] = HostStore.SavedHost(
+            id = savedId,
+            address = address,
+            port = port,
+            user = user,
+            authKind = authKind,
+            keyPath = keyPath?.takeIf { it.isNotBlank() },
+            hostKeyPolicy = if (trustOnFirstUse) "accept_new" else "strict",
+            refreshMs = refreshMs,
+        )
+        store.save(stored)
+        secret?.let { store.setSecret(savedId, it.takeIf(String::isNotBlank)) }
+        keyText?.let { store.setSecret(savedId, it.takeIf(String::isNotBlank), HostStore.Kind.KEY_TEXT) }
+
+        viewModelScope.launch {
+            // Not removeHost: that would also erase the record and its secrets, the very things
+            // being kept.
+            withContext(Dispatchers.IO) { core.removeTarget(id) }
+            val wasSelected = selection == id
+            hosts = hosts.filterNot { it.id == id }
+            if (wasSelected) selection = null
+            start(stored[index], selectWhenReady = wasSelected)
+        }
+    }
+
+    /** The saved record behind a live host, for populating an edit form. */
+    fun saved(id: String): HostStore.SavedHost? {
+        val savedId = hosts.firstOrNull { it.id == id }?.savedId ?: return null
+        return store.load().firstOrNull { it.id == savedId }
+    }
+
+    /**
+     * Run a command on a host.
+     *
+     * The core call blocks until the host answers, so it goes to an IO thread. Failures come back
+     * as output rather than as a thrown exception, because from the reader's point of view "could
+     * not run it" and "it printed an error" belong in the same place — the transcript.
+     */
+    suspend fun runCommand(hostId: String, command: String): CommandEntry =
+        withContext(Dispatchers.IO) {
+            try {
+                val result = core.runCommand(hostId, command)
+                CommandEntry(
+                    command = command,
+                    output = result.output,
+                    exitCode = result.exitCode,
+                    elapsedMs = result.elapsedMs.toLong(),
+                )
+            } catch (e: Exception) {
+                CommandEntry(
+                    command = command,
+                    output = e.message ?: "The command could not be run.",
+                    exitCode = -1,
+                    elapsedMs = 0,
+                )
+            }
+        }
+
     fun host(id: String?): Host? = hosts.firstOrNull { it.id == id }
 
     /** Format a value exactly as the core does, so the platforms never drift apart. */
@@ -156,6 +254,25 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
         core.format(value, unitSuffix, binaryScaled)
 
     fun formatDuration(seconds: Double): String = core.formatDuration(seconds)
+
+    /** Format a gauge the way the core would, uptime included. */
+    fun formatGauge(gauge: uniffi.sg_ffi.MetricGauge): String =
+        if (gauge.metric == "uptime") {
+            core.formatDuration(gauge.value)
+        } else {
+            core.format(gauge.value, gauge.unitSuffix, gauge.binaryScaled)
+        }
+
+    /**
+     * Switch between the plain-language summary and every reading, and remember the choice.
+     *
+     * Named `showTechnical(…)` rather than `setShowTechnical` because Kotlin already generates
+     * that name for the property itself, and the two would collide on the JVM.
+     */
+    fun showTechnical(value: Boolean) {
+        showTechnical = value
+        store.setShowTechnical(value)
+    }
 
     private fun poll() {
         if (hosts.isEmpty()) return

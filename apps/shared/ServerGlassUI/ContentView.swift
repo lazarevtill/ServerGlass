@@ -6,9 +6,13 @@ public struct ContentView: View {
 
     @EnvironmentObject private var model: CoreModel
     @State private var showingAddHost = false
+    /// The host being edited, if any. Identified by its live target id.
+    @State private var editingHost: String?
     /// Simple by default. Someone who needs the technical view will find it and it is remembered;
     /// someone who does not should never be shown a load average.
     @AppStorage("sg.showTechnicalDetails") private var showTechnical = false
+    /// Which host is showing its command runner, keyed by target id.
+    @State private var commandHost: String?
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -16,6 +20,43 @@ public struct ContentView: View {
     public var body: some View {
         layout
             .sheet(isPresented: $showingAddHost) { AddHostSheet() }
+            .sheet(item: $editingHost) { id in
+                if let saved = model.saved(for: id) {
+                    AddHostSheet(editing: saved, targetId: id)
+                }
+            }
+            .environment(\.editHost, { editingHost = $0 })
+            // Errors that belong to the app rather than to one host — a Keychain refusal, a
+            // target that would not start. Without this they were set and never shown.
+            .alert(
+                "Something went wrong",
+                isPresented: Binding(
+                    get: { model.lastError != nil },
+                    set: { if !$0 { model.lastError = nil } })
+            ) {
+                Button("OK", role: .cancel) { model.lastError = nil }
+            } message: {
+                Text(model.lastError ?? "")
+            }
+            .sheet(item: $commandHost) { id in
+                if let host = model.host(id: id) {
+                    NavigationStack {
+                        CommandView(host: host)
+                            .navigationTitle("Run a command")
+                            #if os(iOS)
+                                .navigationBarTitleDisplayMode(.inline)
+                            #endif
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Done") { commandHost = nil }
+                                }
+                            }
+                    }
+                    #if os(macOS)
+                        .frame(minWidth: 640, minHeight: 460)
+                    #endif
+                }
+            }
     }
 
     /// A phone gets a navigation stack; anything with room gets the two-column split.
@@ -56,19 +97,15 @@ public struct ContentView: View {
     #if os(iOS)
         private var stackLayout: some View {
             NavigationStack {
-                List {
-                    if model.hosts.count > 1 {
-                        NavigationLink(value: Selection.statusID) {
-                            Label("All hosts", systemImage: "square.grid.2x2")
-                        }
-                    }
-                    Section("Hosts") {
-                        ForEach(model.hosts) { host in
-                            NavigationLink(value: host.id) { SidebarRow(host: host) }
-                        }
-                        .onDelete { offsets in
-                            for index in offsets { model.removeHost(id: model.hosts[index].id) }
-                        }
+                Group {
+                    if model.hosts.isEmpty {
+                        // The split layout puts this in its detail column. A stack has no detail
+                        // column, so without this a phone opens on an empty "Hosts" header over
+                        // black — a list of nothing, with no indication that anything is missing
+                        // or what to do about it.
+                        EmptyState(showingAddHost: $showingAddHost)
+                    } else {
+                        hostList
                     }
                 }
                 .navigationTitle("ServerGlass")
@@ -80,6 +117,35 @@ public struct ContentView: View {
                         } label: {
                             Label("Add Host", systemImage: "plus")
                         }
+                    }
+                }
+            }
+        }
+
+        private var hostList: some View {
+            List {
+                if model.hosts.count > 1 {
+                    NavigationLink(value: Selection.statusID) {
+                        Label("All hosts", systemImage: "square.grid.2x2")
+                    }
+                }
+                Section("Hosts") {
+                    ForEach(model.hosts) { host in
+                        NavigationLink(value: host.id) { SidebarRow(host: host) }
+                            // Swiping is the iOS idiom but it is invisible; the context menu is
+                            // how someone who has never swiped a row finds these at all.
+                            .contextMenu {
+                                Button("Edit…") { editingHost = host.id }
+                                Button("Remove", role: .destructive) {
+                                    model.removeHost(id: host.id)
+                                }
+                            }
+                            .swipeActions(edge: .leading) {
+                                Button("Edit") { editingHost = host.id }.tint(Theme.info)
+                            }
+                    }
+                    .onDelete { offsets in
+                        for index in offsets { model.removeHost(id: model.hosts[index].id) }
                     }
                 }
             }
@@ -101,6 +167,15 @@ public struct ContentView: View {
                     }
                 }
                 .toolbar {
+                    ToolbarItem(placement: .automatic) {
+                        Button {
+                            commandHost = host.id
+                        } label: {
+                            Label("Run a command", systemImage: "terminal")
+                        }
+                        .help("Run a command on this server")
+                        .disabled(!host.isOnline)
+                    }
                     ToolbarItem(placement: .automatic) {
                         Button {
                             withAnimation { showTechnical.toggle() }
@@ -136,6 +211,7 @@ enum Selection {
 struct Sidebar: View {
     @EnvironmentObject private var model: CoreModel
     @Binding var showingAddHost: Bool
+    @Environment(\.editHost) private var editHost
 
     var body: some View {
         List(selection: $model.selection) {
@@ -153,6 +229,7 @@ struct Sidebar: View {
                     SidebarRow(host: host)
                         .tag(host.id)
                         .contextMenu {
+                            Button("Edit…") { editHost(host.id) }
                             Button("Remove", role: .destructive) { model.removeHost(id: host.id) }
                         }
                 }
@@ -355,4 +432,25 @@ struct EmptyState: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
     }
+}
+
+
+/// How a row deep in the view tree asks for the edit sheet.
+///
+/// The sheet is presented once at the root — two sheets for the same host, one per list, is how
+/// they end up disagreeing — so the request has to travel down rather than the presentation up.
+struct EditHostAction: EnvironmentKey {
+    static let defaultValue: @MainActor (String) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    var editHost: @MainActor (String) -> Void {
+        get { self[EditHostAction.self] }
+        set { self[EditHostAction.self] = newValue }
+    }
+}
+
+/// `sheet(item:)` needs an `Identifiable`, and a host id is already unique.
+extension String: @retroactive Identifiable {
+    public var id: String { self }
 }

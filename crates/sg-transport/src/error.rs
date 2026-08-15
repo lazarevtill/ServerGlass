@@ -31,6 +31,9 @@ pub enum TransportError {
     #[error("could not read private key {path}: {detail}")]
     KeyFile { path: PathBuf, detail: String },
 
+    #[error("could not read the pasted private key: {detail}")]
+    KeyText { detail: String },
+
     #[error("no ssh-agent available: {0}")]
     NoAgent(String),
 
@@ -72,6 +75,7 @@ impl TransportError {
             | TransportError::UnknownHostKey { .. }
             | TransportError::HostKeyMismatch { .. }
             | TransportError::KeyFile { .. }
+            | TransportError::KeyText { .. }
             | TransportError::NoAgent(_)
             | TransportError::AgentNoIdentity { .. } => false,
         }

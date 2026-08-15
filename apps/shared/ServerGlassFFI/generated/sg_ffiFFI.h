@@ -279,6 +279,11 @@ RustBuffer uniffi_sg_ffi_fn_method_serverglass_format_duration(uint64_t ptr, dou
 void uniffi_sg_ffi_fn_method_serverglass_remove_target(uint64_t ptr, RustBuffer target_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_RUN_COMMAND
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_RUN_COMMAND
+RustBuffer uniffi_sg_ffi_fn_method_serverglass_run_command(uint64_t ptr, RustBuffer target_id, RustBuffer command, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_SNAPSHOT
 #define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_SNAPSHOT
 RustBuffer uniffi_sg_ffi_fn_method_serverglass_snapshot(uint64_t ptr, RustBuffer target_id, RustCallStatus *_Nonnull out_status
@@ -580,6 +585,12 @@ uint16_t uniffi_sg_ffi_checksum_method_serverglass_format_duration(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_REMOVE_TARGET
 #define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_REMOVE_TARGET
 uint16_t uniffi_sg_ffi_checksum_method_serverglass_remove_target(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_RUN_COMMAND
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_RUN_COMMAND
+uint16_t uniffi_sg_ffi_checksum_method_serverglass_run_command(void
     
 );
 #endif

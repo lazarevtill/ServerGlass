@@ -90,6 +90,10 @@ fun App(model: CoreModel = viewModel(), demoHost: String? = null, demoKey: Strin
 
     val selected = model.host(model.selection) ?: model.hosts.firstOrNull()
     var addingServer by remember { mutableStateOf(false) }
+    /// The live target id being edited, or null when nothing is.
+    var editingServer by remember { mutableStateOf<String?>(null) }
+    /// The host whose command runner is open, or null.
+    var commandHost by remember { mutableStateOf<String?>(null) }
 
     // Two panes always show a detail, so the list highlight should follow it. One pane must not
     // select anything on its own — see the note in CoreModel.start.
@@ -101,24 +105,48 @@ fun App(model: CoreModel = viewModel(), demoHost: String? = null, demoKey: Strin
     // returning to the list.
     BackHandler(enabled = !twoPane && model.selection != null) { model.selection = null }
 
+    // Full screen rather than a pane: a command transcript and an on-screen keyboard need the
+    // room, and this is a mode you are in rather than a thing you glance at.
+    val commanding = commandHost?.let { model.host(it) }
+    if (commanding != null) {
+        CommandScreen(host = commanding, model = model, onBack = { commandHost = null })
+        return
+    }
+
     if (twoPane && model.hosts.isNotEmpty()) {
-        TwoPane(model = model, fold = fold, selected = selected, onAdd = { addingServer = true })
+        TwoPane(
+            model = model,
+            fold = fold,
+            selected = selected,
+            onAdd = { addingServer = true },
+            onEdit = { editingServer = it },
+            onCommand = { commandHost = it },
+        )
     } else {
         Box(Modifier.fillMaxSize().background(Theme.background)) {
             if (selected != null && model.selection != null) {
-                SimpleHostScreen(
+                HostScreen(
                     host = selected,
                     model = model,
                     onBack = { model.selection = null },
+                    onEdit = { editingServer = selected.id },
+                    onCommand = { commandHost = selected.id },
                 )
             } else {
-                HostList(model = model, onAdd = { addingServer = true })
+                HostList(
+                    model = model,
+                    onAdd = { addingServer = true },
+                    onEdit = { editingServer = it },
+                )
             }
         }
     }
 
     if (addingServer) {
         AddServerDialog(model = model, onDismiss = { addingServer = false })
+    }
+    editingServer?.let { id ->
+        AddServerDialog(model = model, onDismiss = { editingServer = null }, editing = id)
     }
 }
 
@@ -132,7 +160,14 @@ fun App(model: CoreModel = viewModel(), demoHost: String? = null, demoKey: Strin
  * tolerates a foldable and one that fits it.
  */
 @Composable
-private fun TwoPane(model: CoreModel, fold: FoldState, selected: Host?, onAdd: () -> Unit) {
+private fun TwoPane(
+    model: CoreModel,
+    fold: FoldState,
+    selected: Host?,
+    onAdd: () -> Unit,
+    onEdit: (String) -> Unit,
+    onCommand: (String) -> Unit,
+) {
     val density = LocalDensity.current
 
     Row(Modifier.fillMaxSize().background(Theme.background)) {
@@ -143,22 +178,55 @@ private fun TwoPane(model: CoreModel, fold: FoldState, selected: Host?, onAdd: (
                 with(density) { (fold.hingeWidthPx / 2).toDp() }
             val hingeWidth = with(density) { fold.hingeWidthPx.toDp() }
 
-            HostList(model = model, onAdd = onAdd, modifier = Modifier.width(listWidth).fillMaxHeight())
+            HostList(
+                model = model,
+                onAdd = onAdd,
+                onEdit = onEdit,
+                modifier = Modifier.width(listWidth).fillMaxHeight(),
+            )
             // The seam. Deliberately empty.
             Spacer(Modifier.width(hingeWidth).fillMaxHeight())
-            DetailPane(model = model, selected = selected, modifier = Modifier.weight(1f))
+            DetailPane(
+                model = model,
+                selected = selected,
+                onEdit = onEdit,
+                onCommand = onCommand,
+                modifier = Modifier.weight(1f),
+            )
         } else {
-            HostList(model = model, onAdd = onAdd, modifier = Modifier.width(300.dp).fillMaxHeight())
-            DetailPane(model = model, selected = selected, modifier = Modifier.weight(1f))
+            HostList(
+                model = model,
+                onAdd = onAdd,
+                onEdit = onEdit,
+                modifier = Modifier.width(300.dp).fillMaxHeight(),
+            )
+            DetailPane(
+                model = model,
+                selected = selected,
+                onEdit = onEdit,
+                onCommand = onCommand,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
 
 @Composable
-private fun DetailPane(model: CoreModel, selected: Host?, modifier: Modifier = Modifier) {
+private fun DetailPane(
+    model: CoreModel,
+    selected: Host?,
+    onEdit: (String) -> Unit,
+    onCommand: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Box(modifier.fillMaxSize().background(Theme.background)) {
         if (selected != null) {
-            SimpleHostScreen(host = selected, model = model)
+            HostScreen(
+                host = selected,
+                model = model,
+                onEdit = { onEdit(selected.id) },
+                onCommand = { onCommand(selected.id) },
+            )
         } else {
             androidx.compose.material3.Text(
                 "Select a server",
@@ -166,5 +234,40 @@ private fun DetailPane(model: CoreModel, selected: Host?, modifier: Modifier = M
                 modifier = Modifier.padding(20.dp),
             )
         }
+    }
+}
+
+
+/**
+ * One host: the plain-language summary, or every reading.
+ *
+ * The choice is remembered, and it is the same preference the Apple apps remember — someone who
+ * has decided they want the technical view has decided it for the app, not for one screen.
+ */
+@Composable
+private fun HostScreen(
+    host: Host,
+    model: CoreModel,
+    onBack: (() -> Unit)? = null,
+    onEdit: () -> Unit,
+    onCommand: () -> Unit,
+) {
+    if (model.showTechnical) {
+        TechnicalHostScreen(
+            host = host,
+            model = model,
+            onBack = onBack,
+            onSimple = { model.showTechnical(false) },
+            onCommand = onCommand,
+        )
+    } else {
+        SimpleHostScreen(
+            host = host,
+            model = model,
+            onBack = onBack,
+            onEdit = onEdit,
+            onCommand = onCommand,
+            onShowTechnical = { model.showTechnical(true) },
+        )
     }
 }

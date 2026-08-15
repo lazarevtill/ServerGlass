@@ -24,6 +24,7 @@ pub mod memory;
 pub mod network;
 pub mod pressure;
 pub mod process;
+pub mod sensors;
 pub mod tcp;
 
 #[cfg(test)]
@@ -40,6 +41,7 @@ pub use memory::MemorySource;
 pub use network::NetworkSource;
 pub use pressure::PressureSource;
 pub use process::ProcessSource;
+pub use sensors::SensorSource;
 pub use tcp::TcpSource;
 
 /// Every built-in collector, in the order the status page shows them.
@@ -53,6 +55,7 @@ pub fn builtin_sources() -> Vec<Box<dyn Source>> {
         Box::new(NetworkSource::default()),
         Box::new(TcpSource::default()),
         Box::new(PressureSource::default()),
+        Box::new(SensorSource::default()),
         Box::new(CgroupSource::default()),
         Box::new(ProcessSource::default()),
     ]
@@ -206,8 +209,11 @@ mod tests {
         // single round trip, so the cost of crossing this is bytes rather than latency — but an
         // unbounded request set is how a one-round-trip design quietly turns into a slow one.
         // Raise it deliberately when a collector earns its place, never to make a test pass.
+        // Raised to 17 for the sensor sweep: temperature is the reading people go looking for
+        // first, and the alternative on the host is installing lm-sensors, which the first
+        // invariant forbids.
         assert!(
-            unique.len() <= 16,
+            unique.len() <= 17,
             "a refresh would fetch {} distinct things: {all:#?}",
             unique.len()
         );

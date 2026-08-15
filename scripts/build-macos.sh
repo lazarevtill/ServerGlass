@@ -10,7 +10,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 PROFILE="${1:-debug}"
-GENERATED=apps/macos/Sources/ServerGlassFFI/generated
+# The path `apps/Package.swift` actually consumes. It used to point under `apps/macos/`, which
+# nothing reads: the macOS build then compiled the UI against whatever bindings were last written
+# by `build-ios.sh`, so a change to the FFI surface reached iOS and silently did not reach macOS.
+GENERATED=apps/shared/ServerGlassFFI/generated
 
 echo "==> building sg-ffi ($PROFILE)"
 if [[ $PROFILE == release ]]; then

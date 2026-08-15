@@ -40,6 +40,14 @@ const WORKING_HARD: f64 = 85.0;
 /// thresholds are deliberately conservative: brief pressure is normal on any busy machine.
 const STALLING: f64 = 20.0;
 const STALLING_BADLY: f64 = 40.0;
+/// Degrees Celsius before heat is worth mentioning, and before it is worth alarm.
+///
+/// A processor at 75°C is working, not dying — server parts are specified well beyond that, and a
+/// dashboard that panics at every warm afternoon teaches people to ignore it. Intel and AMD parts
+/// throttle around 95-100°C, so 90 is the point where the machine is about to start slowing itself
+/// down and someone should look at the fans or the dust.
+const RUNNING_WARM: f64 = 80.0;
+const OVERHEATING: f64 = 90.0;
 
 /// Assess a host from its headline gauges.
 ///
@@ -145,6 +153,22 @@ pub fn assess(state: &ConnectionState, gauges: &[MetricGauge], has_data: bool) -
         }
     }
 
+    // Heat is checked before utilisation for the same reason pressure is: a machine that is hot
+    // will throttle itself, and "the processor is 88% busy" would then be describing the symptom
+    // while the cause goes unmentioned.
+    if let Some(temperature) = value("cpu_temp") {
+        if temperature >= OVERHEATING {
+            return health(
+                "problem",
+                "Running very hot",
+                format!(
+                    "The processor is at {temperature:.0}°C. At this temperature it slows itself \
+                     down to avoid damage — usually dust in the fans or a blocked air intake."
+                ),
+            );
+        }
+    }
+
     if let Some(disk) = value("disk_usage") {
         if disk >= FILLING_UP {
             return health(
@@ -171,6 +195,18 @@ pub fn assess(state: &ConnectionState, gauges: &[MetricGauge], has_data: bool) -
                 format!(
                     "Something was waiting its turn for the processor {cpu:.0}% of the last \
                      minute. Busy is fine; queueing means requests are being made to wait."
+                ),
+            );
+        }
+    }
+    if let Some(temperature) = value("cpu_temp") {
+        if temperature >= RUNNING_WARM {
+            return health(
+                "busy",
+                "Running warm",
+                format!(
+                    "The processor is at {temperature:.0}°C. Not dangerous, but worth checking \
+                     the fans if it stays there while the machine is idle."
                 ),
             );
         }
@@ -218,6 +254,13 @@ pub fn friendly_failure(message: &str) -> String {
     } else if lower.contains("no ssh-agent") {
         "No key agent is running, so there is no key to sign in with. Choose a key file instead, \
          or start your key agent."
+            .into()
+    } else if lower.contains("could not read the pasted private key") {
+        // Found while testing the paste path: a key that loses a character in transit fails with
+        // "Base64 decoding error: invalid length", which tells the person nothing about the one
+        // thing they can actually check.
+        "That key could not be read. Paste the whole key, including the -----BEGIN----- and \
+         -----END----- lines, and add its passphrase below if it has one."
             .into()
     } else if lower.contains("could not read private key") {
         "That key file could not be read. Check the path is right and the passphrase matches."
@@ -379,6 +422,63 @@ mod tests {
             true,
         );
         assert_eq!(health.headline, "Struggling for memory");
+    }
+
+    /// The failure a bad paste produces, which is the one this audience will actually hit.
+    #[test]
+    fn a_mangled_pasted_key_says_what_to_check() {
+        let said = friendly_failure(
+            "could not read the pasted private key: Base64 decoding error: invalid length at 272",
+        );
+        assert!(said.contains("BEGIN"), "{said}");
+        assert!(!said.contains("Base64"), "the decoder's wording helps nobody: {said}");
+    }
+
+    /// A key *file* problem is a different thing to check, and must not be answered with advice
+    /// about pasting.
+    #[test]
+    fn a_key_file_problem_still_talks_about_the_file() {
+        let said = friendly_failure("could not read private key /root/.ssh/id_ed25519: no such file");
+        assert!(said.contains("path"), "{said}");
+    }
+
+    /// A hot machine throttles itself, so heat explains slowness that utilisation only describes.
+    #[test]
+    fn overheating_outranks_being_busy() {
+        let health = assess(
+            &ConnectionState::Online,
+            &[gauge("cpu_usage", 95.0), gauge("cpu_temp", 96.0)],
+            true,
+        );
+        assert_eq!(health.headline, "Running very hot");
+        assert!(health.detail.contains("96"), "{}", health.detail);
+    }
+
+    /// Server parts are specified well past 75°C. Panicking at every warm afternoon is how a
+    /// dashboard teaches people to ignore it.
+    #[test]
+    fn a_normally_warm_processor_is_not_a_problem() {
+        let health = assess(
+            &ConnectionState::Online,
+            &[gauge("cpu_usage", 30.0), gauge("cpu_temp", 72.0)],
+            true,
+        );
+        assert_eq!(health.headline, "Everything looks good");
+
+        let warm = assess(
+            &ConnectionState::Online,
+            &[gauge("cpu_usage", 30.0), gauge("cpu_temp", 84.0)],
+            true,
+        );
+        assert_eq!(warm.headline, "Running warm");
+        assert_eq!(warm.level, "busy", "warm is worth mentioning, not worth alarm");
+    }
+
+    /// Temperature is a headline reading but deliberately not a simple-view tile: the simple view
+    /// is four things on purpose, and heat already speaks through the verdict.
+    #[test]
+    fn temperature_stays_out_of_the_simple_tiles() {
+        assert_eq!(plain_name("cpu_temp"), None);
     }
 
     /// Busy is not the same as queueing, and the wording has to keep them apart.

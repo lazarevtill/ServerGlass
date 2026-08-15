@@ -77,6 +77,7 @@ struct HostDetailView: View {
                     pair(wide) { networkPanel } _: { diskPanel }
                     processPanel
                     filesystemPanel
+                    sensorPanel
                     socketsPanel
                 }
             }
@@ -360,6 +361,65 @@ struct HostDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: Sensors
+
+    /// Temperatures, fans and power draw.
+    ///
+    /// Grouped by kind rather than by chip: someone checking on a hot machine wants every
+    /// temperature together, and the chip a reading came from is a detail below that. Hottest
+    /// first, so the reading that matters is the one you see without reading the list.
+    private var sensorPanel: some View {
+        let sensors = snapshot.entities(ofKind: "sensor")
+        let temperatures = sensors
+            .filter { $0.gauge("temp") != nil }
+            .sorted { ($0.gauge("temp")?.value ?? 0) > ($1.gauge("temp")?.value ?? 0) }
+        let fans = sensors.filter { $0.gauge("fan") != nil }
+        let power = sensors.filter { $0.gauge("power") != nil }
+
+        return Group {
+            if !sensors.isEmpty {
+                Panel(title: "Temperature & power", subtitle: "\(sensors.count) sensors") {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 150), spacing: 18)], spacing: 5
+                    ) {
+                        ForEach(temperatures, id: \.id) { sensor in
+                            if let temp = sensor.gauge("temp") {
+                                KeyValueRow(
+                                    label: sensor.display,
+                                    value: model.format(temp),
+                                    // Against the manufacturer's own limit where the chip
+                                    // publishes one, rather than a number invented here.
+                                    emphasis: Self.heatColor(temp))
+                            }
+                        }
+                        ForEach(fans, id: \.id) { sensor in
+                            if let fan = sensor.gauge("fan") {
+                                KeyValueRow(label: sensor.display, value: model.format(fan))
+                            }
+                        }
+                        ForEach(power, id: \.id) { sensor in
+                            if let watts = sensor.gauge("power") {
+                                KeyValueRow(label: sensor.display, value: model.format(watts))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Warm and hot, judged against the chip's critical point when it reports one.
+    ///
+    /// A fixed 80°C threshold is wrong in both directions: an NVMe drive is specified to 70 and a
+    /// CPU package to 100, so the same number is an alarm on one and unremarkable on the other.
+    static func heatColor(_ gauge: MetricGauge) -> Color {
+        guard let critical = gauge.max, critical > 0 else {
+            return gauge.value >= 90 ? Theme.bad : gauge.value >= 80 ? Theme.warn : Theme.primary
+        }
+        let fraction = gauge.value / critical
+        return fraction >= 0.95 ? Theme.bad : fraction >= 0.85 ? Theme.warn : Theme.primary
     }
 
     // MARK: Sockets

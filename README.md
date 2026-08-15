@@ -24,7 +24,7 @@ Every other number is one tap away.
 All of them share one Rust core: the collectors, the scheduler, the rate maths, the health
 verdicts, the wording and the number formatting are written once.
 
-**207 tests**, including live runs against Debian and Alpine SSH fixtures, and a regression test
+**228 tests**, including live runs against Debian and Alpine SSH fixtures, and a regression test
 asserting that a full refresh costs exactly one network round trip.
 
 ## Install
@@ -159,6 +159,47 @@ are operating-system facilities backed by hardware that Rust cannot reach from i
 reimplementing them in the core would mean inventing key management instead of using the one the
 platform already audits. The core stays stateless about secrets and is handed one per connection.
 
+### Signing in
+
+Four ways, and the right default differs by device:
+
+| | Best on | Where the secret lives |
+|---|---|---|
+| SSH agent | macOS, Linux | Nowhere — ServerGlass never sees key material |
+| Key file | macOS, Linux | The file stays where it is; only a passphrase is stored |
+| **Paste a key** | iPhone, iPad, Android | Keychain / Android Keystore |
+| Password | anywhere that allows it | Keychain / Android Keystore |
+
+Pasting is there because a phone has no ssh-agent and no user-visible filesystem to point a path
+at, which left the mobile apps with password authentication as the only practical option. The
+paste box is multi-line and monospaced on purpose: a key is twenty-odd lines, and seeing the
+`BEGIN` and `END` lines is how you tell a truncated paste from a whole one.
+
+### Temperature, fans and power
+
+Read from `/sys/class/hwmon` and `/sys/class/thermal`, so nothing has to be installed —
+`lm-sensors` is the usual answer and would break the first invariant. Voltages and currents are
+deliberately left out: a modern board reports dozens, they mean nothing without the board's own
+tolerances, and they would bury the two temperatures worth reading.
+
+The hottest CPU-package reading becomes a headline gauge and feeds the health verdict, judged
+against the chip's own critical point where it publishes one — an NVMe drive is specified to 70°C
+and a CPU package to 100, so a fixed threshold would be wrong in both directions.
+
+### Running a command
+
+Every app can run a command on a host: `systemctl restart nginx`, `docker ps`, `tail -n 50
+/var/log/syslog`. It runs on the connection the readings already use, so there is no second
+sign-in and no second session for the host to log, and it costs one round trip.
+
+It is a command runner, not a terminal. No PTY is allocated, so `top`, `vim` and anything that
+prompts will not work — the screen says so rather than leaving you to discover it by waiting out
+the timeout. Standard error is captured alongside standard output, because a failed command's
+message is the answer.
+
+This is the one place ServerGlass runs something it was not asked to read — and it runs only what
+*you* typed. The collectors still only ever read.
+
 Where the kernel supports it (4.20+ with `CONFIG_PSI`), ServerGlass reads
 [Pressure Stall Information](https://docs.kernel.org/accounting/psi.html) and prefers it for the
 health verdict. A host can sit at 100% CPU and be perfectly healthy — that is what a server is for
@@ -203,7 +244,7 @@ adb shell am start -n cloud.lazarev.serverglass/.MainActivity \
 |---|---|
 | `crates/sg-model` | Domain types and the `Source` trait. No I/O, no async, `serde` only. |
 | `crates/sg-transport` | russh client, the batched shell protocol, capability detection. |
-| `crates/sg-collect` | Collectors: CPU, memory, load, pressure, filesystems, disk I/O, network, TCP, processes. |
+| `crates/sg-collect` | Collectors: CPU, memory, load, pressure, filesystems, disk I/O, network, TCP, processes, cgroup v2 containers and VMs, hwmon/thermal sensors. |
 | `crates/sg-core` | Request merging, rate derivation, the live store, the per-target runtime. |
 | `crates/sg-ffi` | UniFFI surface, UI-shaped view models, and the plain-language layer. |
 | `crates/sg-bindgen` | Binding generator, separate so `clap` never reaches the shipped library. |
@@ -223,8 +264,8 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
 
 **Next**
 
-- Terminal (`alacritty_terminal` in the core, so one implementation serves every platform),
-  snippets, SFTP file browsing
+- A real terminal (`alacritty_terminal` in the core, so one implementation serves every platform)
+  to replace the one-shot command runner, snippets, SFTP file browsing
 - Declarative probes and Prometheus/OpenMetrics scraping
 - Containers and orchestration (Docker, Podman, real Kubernetes), virtualisation and hardware,
   services/databases/logs, network and external checks
@@ -237,6 +278,8 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
 
 - Setup still assumes someone who knows what a hostname and an SSH key are. The *reading*
   experience is written for a non-technical person; the *adding* experience is not yet.
+- Sensor parsing is covered by tests against captured `hwmon` layouts, but no machine available
+  here exposes hwmon chips, so the sweep has not been run against real sensor hardware.
 - CI builds and tests the Rust core only. No macOS or Android runner is configured, so the apps
   are built locally.
 

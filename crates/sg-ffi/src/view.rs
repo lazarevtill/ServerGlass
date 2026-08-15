@@ -13,10 +13,16 @@ pub struct TargetConfig {
     pub host: String,
     pub port: u16,
     pub user: String,
-    /// `"agent"`, `"key"` or `"password"`.
+    /// `"agent"`, `"key"`, `"key_text"` or `"password"`.
     pub auth_kind: String,
     /// Path to a private key, when `auth_kind` is `"key"`.
     pub key_path: Option<String>,
+    /// The private key itself, when `auth_kind` is `"key_text"`.
+    ///
+    /// How a key is given on a phone: there is no user-visible filesystem to point a path at and
+    /// no ssh-agent to defer to, so the key body is pasted. Secret material, handled exactly like
+    /// `secret` — kept in the platform keystore and passed here per connection.
+    pub key_text: Option<String>,
     /// Key passphrase or account password. Held only for the life of the connection attempt.
     pub secret: Option<String>,
     /// `"strict"`, `"accept_new"` or `"accept_any"`.
@@ -205,11 +211,12 @@ impl TargetSnapshot {
 ///
 /// A fixed order also beats sorting by name: these are the tiles people actually look at, and they
 /// must not move when a host gains a swap partition.
-const HEADLINE: [&str; 8] = [
+const HEADLINE: [&str; 9] = [
     "cpu_usage",
     "mem_usage",
     "disk_usage",
     "swap_usage",
+    "cpu_temp",
     "load1",
     "net_rx",
     "net_tx",
@@ -245,6 +252,8 @@ const DETAIL_ORDER: &[&str] = &[
     "load15",
     "procs_total",
     "uptime",
+    // Heat sits with the CPU it belongs to rather than at the end with the rates.
+    "cpu_temp",
     // Throughput.
     "disk_read",
     "disk_write",
@@ -273,6 +282,9 @@ fn group_title(source: &str) -> Option<&'static str> {
         "proc.diskio" => Some("Disk I/O"),
         "proc.network" => Some("Network totals"),
         "proc.tcp" => Some("Sockets & TCP"),
+        // Individual readings get their own per-sensor cards; the host-level temperature is
+        // already a headline, so a flat duplicate list would say everything twice.
+        "sys.sensors" => None,
         // Filesystems get their own per-mount cards; a duplicate flat list would be noise.
         "proc.filesystem" => None,
         _ => Some("Other"),
@@ -488,6 +500,10 @@ pub fn connection_spec(config: &TargetConfig) -> sg_transport::ConnectionSpec {
     let auth = match config.auth_kind.as_str() {
         "key" => Auth::KeyFile {
             path: config.key_path.clone().unwrap_or_default().into(),
+            passphrase: config.secret.clone().filter(|s| !s.is_empty()),
+        },
+        "key_text" => Auth::KeyText {
+            key: config.key_text.clone().unwrap_or_default(),
             passphrase: config.secret.clone().filter(|s| !s.is_empty()),
         },
         "password" => Auth::Password(config.secret.clone().unwrap_or_default()),
@@ -895,6 +911,7 @@ mod tests {
             user: "u".into(),
             auth_kind: "nonsense".into(),
             key_path: None,
+            key_text: None,
             secret: None,
             host_key_policy: "nonsense".into(),
             refresh_ms: 1000,
@@ -922,6 +939,7 @@ mod tests {
             user: "root".into(),
             auth_kind: "key".into(),
             key_path: Some("/tmp/id".into()),
+            key_text: None,
             secret: Some(String::new()),
             host_key_policy: "accept_new".into(),
             refresh_ms: 1000,

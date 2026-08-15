@@ -279,3 +279,59 @@ async fn authentication_failure_is_not_transient() {
         "auth failure would be retried in a loop: {err}"
     );
 }
+
+/// A pasted key must reach the same host the same key file reaches.
+///
+/// This is the whole claim of `Auth::KeyText`: on a phone there is no path to point at and no
+/// agent to defer to, so the key arrives as text — and it has to be the *same* key, not a
+/// second, subtly different code path that works on a laptop and fails on a phone.
+#[tokio::test]
+async fn a_pasted_key_authenticates_exactly_like_the_key_file() {
+    if !fixture_up(DEBIAN_PORT).await {
+        return;
+    }
+    let key = std::fs::read_to_string(fixture_key()).expect("read the fixture key");
+
+    let spec = ConnectionSpec::new("127.0.0.1", "root")
+        .port(DEBIAN_PORT)
+        .auth(Auth::KeyText {
+            key,
+            passphrase: None,
+        })
+        .host_key_policy(HostKeyPolicy::AcceptAny);
+
+    let mut session = SshSession::connect(spec).await.expect("pasted-key connect");
+    let uptime = Request::read("/proc/uptime");
+    let responses = session
+        .batch(&[uptime.clone()])
+        .await
+        .expect("read over the pasted-key session");
+    assert!(responses
+        .text(&uptime)
+        .is_some_and(|t| !t.trim().is_empty()));
+    session.close().await.unwrap();
+}
+
+/// Whitespace a paste picks up must not stop the key decoding.
+///
+/// Pasting from a chat client, a password manager or a terminal routinely adds a trailing newline
+/// or leading spaces, and a key that "does not work when pasted" is indistinguishable from a
+/// broken feature.
+#[tokio::test]
+async fn a_pasted_key_survives_the_whitespace_pasting_adds() {
+    if !fixture_up(DEBIAN_PORT).await {
+        return;
+    }
+    let key = std::fs::read_to_string(fixture_key()).expect("read the fixture key");
+    let padded = format!("\n  \n{}\n\n  ", key.trim());
+
+    let spec = ConnectionSpec::new("127.0.0.1", "root")
+        .port(DEBIAN_PORT)
+        .auth(Auth::KeyText {
+            key: padded,
+            passphrase: None,
+        })
+        .host_key_policy(HostKeyPolicy::AcceptAny);
+
+    assert!(SshSession::connect(spec).await.is_ok());
+}

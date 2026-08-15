@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use russh::client::{self, Handle};
 use russh::keys::agent::client::AgentClient;
-use russh::keys::{load_secret_key, PrivateKeyWithHashAlg};
+use russh::keys::{decode_secret_key, load_secret_key, PrivateKeyWithHashAlg};
 use russh::{ChannelMsg, Disconnect};
 use sg_model::{Request, Responses};
 use tokio::time::timeout;
@@ -273,13 +273,25 @@ async fn authenticate(handle: &mut Handle<ClientHandler>, spec: &ConnectionSpec)
             }
         }
 
-        Auth::KeyFile { path, passphrase } => {
-            let key = load_secret_key(path, passphrase.as_deref()).map_err(|e| {
-                TransportError::KeyFile {
-                    path: path.clone(),
-                    detail: e.to_string(),
+        Auth::KeyFile { .. } | Auth::KeyText { .. } => {
+            // A file and a paste differ only in where the bytes come from; everything after
+            // decoding is identical, so the two share one path rather than one being a copy of
+            // the other that drifts.
+            let key = match &spec.auth {
+                Auth::KeyFile { path, passphrase } => load_secret_key(path, passphrase.as_deref())
+                    .map_err(|e| TransportError::KeyFile {
+                        path: path.clone(),
+                        detail: e.to_string(),
+                    })?,
+                Auth::KeyText { key, passphrase } => {
+                    decode_secret_key(key.trim(), passphrase.as_deref()).map_err(|e| {
+                        TransportError::KeyText {
+                            detail: e.to_string(),
+                        }
+                    })?
                 }
-            })?;
+                _ => unreachable!("guarded by the match arm"),
+            };
             let hash_alg = handle.best_supported_rsa_hash().await?.flatten();
             let result = handle
                 .authenticate_publickey(

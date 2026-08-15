@@ -69,42 +69,66 @@ public enum HostStore {
             user: host.user,
             authKind: host.authKind,
             keyPath: host.keyPath,
+            // A pasted key is key material, so it lives beside the passphrase in the Keychain
+            // rather than in the saved record. Stored under its own account so a key and its
+            // passphrase can both exist for the same host.
+            keyText: Keychain.secret(for: host.id, kind: .keyText),
             secret: Keychain.secret(for: host.id),
             hostKeyPolicy: host.hostKeyPolicy,
             refreshMs: host.refreshMs
         )
     }
 
+    /// Erase everything secret belonging to a host.
     public static func forget(_ host: SavedHost) {
-        Keychain.removeSecret(for: host.id)
+        Keychain.setSecret(nil, for: host.id)
+        Keychain.setSecret(nil, for: host.id, kind: .keyText)
     }
 }
 
-/// The system Keychain, used for exactly one thing: the secret belonging to a saved host.
+/// The system Keychain, used for exactly one thing: the secrets belonging to a saved host.
 enum Keychain {
     private static let service = "cloud.lazarev.serverglass"
 
-    static func setSecret(_ secret: String?, for id: String) {
-        removeSecret(for: id)
-        guard let secret, !secret.isEmpty, let data = secret.data(using: .utf8) else { return }
+    /// Which secret. A host can have both — a pasted key *and* the passphrase protecting it.
+    enum Kind: String {
+        case password = ""
+        case keyText = ".key"
+    }
+
+    private static func account(_ id: String, _ kind: Kind) -> String { id + kind.rawValue }
+
+    /// Returns false when the Keychain refused to store the secret.
+    ///
+    /// The status used to be discarded, which turned a storage failure into a *connection*
+    /// failure one screen later: the key came back nil, an empty key was handed to the transport,
+    /// and the app said "could not read the pasted private key". The person then re-pastes a
+    /// perfectly good key, because nothing told them the saving was what failed.
+    ///
+    /// It fails for real reasons — an unsigned build has no keychain-access group, and a device
+    /// with no passcode restricts some accessibility classes — so it has to be reportable.
+    @discardableResult
+    static func setSecret(_ secret: String?, for id: String, kind: Kind = .password) -> Bool {
+        removeSecret(for: id, kind: kind)
+        guard let secret, !secret.isEmpty, let data = secret.data(using: .utf8) else { return true }
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: id,
+            kSecAttrAccount as String: account(id, kind),
             kSecValueData as String: data,
             // Available once the device has been unlocked, and never synced to another device or
             // into a backup: a server password should not travel with an iCloud restore.
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
     }
 
-    static func secret(for id: String) -> String? {
+    static func secret(for id: String, kind: Kind = .password) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: id,
+            kSecAttrAccount as String: account(id, kind),
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
@@ -115,11 +139,11 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func removeSecret(for id: String) {
+    static func removeSecret(for id: String, kind: Kind = .password) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: id,
+            kSecAttrAccount as String: account(id, kind),
         ]
         SecItemDelete(query as CFDictionary)
     }

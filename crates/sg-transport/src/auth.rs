@@ -4,9 +4,8 @@ use std::path::PathBuf;
 
 /// How to authenticate.
 ///
-/// v0 deliberately has no credential vault. Keys are referenced by path or fetched from the
-/// running `ssh-agent`, so ServerGlass never holds long-lived secrets — the passphrase field is
-/// short-lived and used only to decrypt a key file in memory.
+/// Key material never lives in the transport for longer than a connection attempt. Whatever is
+/// held between attempts is held by the platform's own keystore, and handed here per connection.
 #[derive(Clone, Debug)]
 pub enum Auth {
     /// Delegate to the running `ssh-agent` (or Pageant on Windows). The best default: the app
@@ -15,6 +14,15 @@ pub enum Auth {
     /// A private key file, optionally passphrase-protected.
     KeyFile {
         path: PathBuf,
+        passphrase: Option<String>,
+    },
+    /// A private key as text — what someone pastes on a phone.
+    ///
+    /// A phone has no user-visible filesystem and no ssh-agent, so a path is not a usable way to
+    /// name a key there. Pasting the key body is, and it is the same key: this decodes the exact
+    /// bytes `KeyFile` would have read.
+    KeyText {
+        key: String,
         passphrase: Option<String>,
     },
     /// Password authentication, for hosts that allow nothing else.
@@ -27,6 +35,8 @@ impl Auth {
         match self {
             Auth::Agent => "ssh-agent".into(),
             Auth::KeyFile { path, .. } => format!("key {}", path.display()),
+            // Deliberately says nothing about the key itself.
+            Auth::KeyText { .. } => "pasted key".into(),
             Auth::Password(_) => "password".into(),
         }
     }

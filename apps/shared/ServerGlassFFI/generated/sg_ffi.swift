@@ -497,6 +497,22 @@ fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
+    typealias FfiType = Int32
+    typealias SwiftType = Int32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -635,6 +651,19 @@ public protocol ServerGlassProtocol: AnyObject, Sendable {
     func removeTarget(targetId: String) throws 
     
     /**
+     * Run one command on the host and wait for what it printed.
+     *
+     * Blocks until the command finishes, so call it off the UI thread. It runs on the connection
+     * the readings already use — one round trip, no second sign-in — which also means the host
+     * must be online: there is no queueing a command for a machine that is not answering.
+     *
+     * **Not a terminal.** No PTY is allocated, so anything interactive (`top`, `vim`, a `sudo`
+     * password prompt) will produce nothing useful or hang until the timeout. That limit is the
+     * honest shape of the existing transport, and the UIs say so rather than hiding it.
+     */
+    func runCommand(targetId: String, command: String) throws  -> CommandResult
+    
+    /**
      * The most recent completed refresh. Cheap enough to call on a display timer.
      */
     func snapshot(targetId: String) throws  -> TargetSnapshot
@@ -764,6 +793,28 @@ open func removeTarget(targetId: String)throws   {try rustCallWithError(FfiConve
 }
     
     /**
+     * Run one command on the host and wait for what it printed.
+     *
+     * Blocks until the command finishes, so call it off the UI thread. It runs on the connection
+     * the readings already use — one round trip, no second sign-in — which also means the host
+     * must be online: there is no queueing a command for a machine that is not answering.
+     *
+     * **Not a terminal.** No PTY is allocated, so anything interactive (`top`, `vim`, a `sudo`
+     * password prompt) will produce nothing useful or hang until the timeout. That limit is the
+     * honest shape of the existing transport, and the UIs say so rather than hiding it.
+     */
+open func runCommand(targetId: String, command: String)throws  -> CommandResult  {
+    return try  FfiConverterTypeCommandResult_lift(try rustCallWithError(FfiConverterTypeSgError_lift) {
+        uniffiCallStatus in
+    uniffi_sg_ffi_fn_method_serverglass_run_command(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(targetId),
+        FfiConverterString.lower(command),uniffiCallStatus
+    )
+})
+}
+    
+    /**
      * The most recent completed refresh. Cheap enough to call on a display timer.
      */
 open func snapshot(targetId: String)throws  -> TargetSnapshot  {
@@ -855,6 +906,79 @@ public func FfiConverterTypeServerGlass_lower(_ value: ServerGlass) -> UInt64 {
 }
 
 
+
+
+/**
+ * What one command printed, and how it ended.
+ */
+public struct CommandResult: Equatable, Hashable {
+    /**
+     * Everything it wrote, standard error included and in order.
+     */
+    public var output: String
+    /**
+     * -1 when the host did not report one.
+     */
+    public var exitCode: Int32
+    public var elapsedMs: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Everything it wrote, standard error included and in order.
+         */output: String, 
+        /**
+         * -1 when the host did not report one.
+         */exitCode: Int32, elapsedMs: UInt64) {
+        self.output = output
+        self.exitCode = exitCode
+        self.elapsedMs = elapsedMs
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension CommandResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCommandResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CommandResult {
+        return
+            try CommandResult(
+                output: FfiConverterString.read(from: &buf), 
+                exitCode: FfiConverterInt32.read(from: &buf), 
+                elapsedMs: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CommandResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.output, into: &buf)
+        FfiConverterInt32.write(value.exitCode, into: &buf)
+        FfiConverterUInt64.write(value.elapsedMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCommandResult_lift(_ buf: RustBuffer) throws -> CommandResult {
+    return try FfiConverterTypeCommandResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCommandResult_lower(_ value: CommandResult) -> RustBuffer {
+    return FfiConverterTypeCommandResult.lower(value)
+}
 
 
 /**
@@ -1392,13 +1516,21 @@ public struct TargetConfig: Equatable, Hashable {
     public var port: UInt16
     public var user: String
     /**
-     * `"agent"`, `"key"` or `"password"`.
+     * `"agent"`, `"key"`, `"key_text"` or `"password"`.
      */
     public var authKind: String
     /**
      * Path to a private key, when `auth_kind` is `"key"`.
      */
     public var keyPath: String?
+    /**
+     * The private key itself, when `auth_kind` is `"key_text"`.
+     *
+     * How a key is given on a phone: there is no user-visible filesystem to point a path at and
+     * no ssh-agent to defer to, so the key body is pasted. Secret material, handled exactly like
+     * `secret` — kept in the platform keystore and passed here per connection.
+     */
+    public var keyText: String?
     /**
      * Key passphrase or account password. Held only for the life of the connection attempt.
      */
@@ -1413,11 +1545,18 @@ public struct TargetConfig: Equatable, Hashable {
     // declare one manually.
     public init(host: String, port: UInt16, user: String, 
         /**
-         * `"agent"`, `"key"` or `"password"`.
+         * `"agent"`, `"key"`, `"key_text"` or `"password"`.
          */authKind: String, 
         /**
          * Path to a private key, when `auth_kind` is `"key"`.
          */keyPath: String?, 
+        /**
+         * The private key itself, when `auth_kind` is `"key_text"`.
+         *
+         * How a key is given on a phone: there is no user-visible filesystem to point a path at and
+         * no ssh-agent to defer to, so the key body is pasted. Secret material, handled exactly like
+         * `secret` — kept in the platform keystore and passed here per connection.
+         */keyText: String?, 
         /**
          * Key passphrase or account password. Held only for the life of the connection attempt.
          */secret: String?, 
@@ -1429,6 +1568,7 @@ public struct TargetConfig: Equatable, Hashable {
         self.user = user
         self.authKind = authKind
         self.keyPath = keyPath
+        self.keyText = keyText
         self.secret = secret
         self.hostKeyPolicy = hostKeyPolicy
         self.refreshMs = refreshMs
@@ -1455,6 +1595,7 @@ public struct FfiConverterTypeTargetConfig: FfiConverterRustBuffer {
                 user: FfiConverterString.read(from: &buf), 
                 authKind: FfiConverterString.read(from: &buf), 
                 keyPath: FfiConverterOptionString.read(from: &buf), 
+                keyText: FfiConverterOptionString.read(from: &buf), 
                 secret: FfiConverterOptionString.read(from: &buf), 
                 hostKeyPolicy: FfiConverterString.read(from: &buf), 
                 refreshMs: FfiConverterUInt64.read(from: &buf)
@@ -1467,6 +1608,7 @@ public struct FfiConverterTypeTargetConfig: FfiConverterRustBuffer {
         FfiConverterString.write(value.user, into: &buf)
         FfiConverterString.write(value.authKind, into: &buf)
         FfiConverterOptionString.write(value.keyPath, into: &buf)
+        FfiConverterOptionString.write(value.keyText, into: &buf)
         FfiConverterOptionString.write(value.secret, into: &buf)
         FfiConverterString.write(value.hostKeyPolicy, into: &buf)
         FfiConverterUInt64.write(value.refreshMs, into: &buf)
@@ -2105,6 +2247,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sg_ffi_checksum_method_serverglass_remove_target() != 21045) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sg_ffi_checksum_method_serverglass_run_command() != 42076) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sg_ffi_checksum_method_serverglass_snapshot() != 57326) {

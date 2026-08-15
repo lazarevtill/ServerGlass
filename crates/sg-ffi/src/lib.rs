@@ -49,12 +49,33 @@ pub enum SgError {
 // `Exception` subclass, which already has a `message` property, and the duplicate makes every
 // reference to it an "overload resolution ambiguity" that fails the Android build.
 
+/// One command the user asked to run, and where to send the answer.
+type CommandJob = (String, tokio::sync::oneshot::Sender<Result<CommandResult, String>>);
+
 /// One monitored host and its background poller.
 struct Target {
     config: TargetConfig,
     snapshot: Arc<RwLock<TargetSnapshot>>,
     /// Dropping this aborts the poll loop.
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Commands waiting to run on the poll loop's session.
+    ///
+    /// A queue rather than a second connection: the poll loop owns the session, and opening
+    /// another one per command would authenticate again, double the connections a host sees, and
+    /// give the command a different environment from the one the readings come from.
+    commands: tokio::sync::mpsc::UnboundedSender<CommandJob>,
+    /// Held so the receiver survives being handed to each new poll-loop attempt.
+    command_inbox: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<CommandJob>>,
+}
+
+/// What one command printed, and how it ended.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CommandResult {
+    /// Everything it wrote, standard error included and in order.
+    pub output: String,
+    /// -1 when the host did not report one.
+    pub exit_code: i32,
+    pub elapsed_ms: u64,
 }
 
 /// The core, as the UIs see it.
@@ -98,12 +119,16 @@ impl ServerGlass {
             ConnectionState::Idle,
         )));
 
+        let (commands, command_inbox) = tokio::sync::mpsc::unbounded_channel();
+
         self.targets.write().expect("targets lock").insert(
             id.clone(),
             Arc::new(Target {
                 config,
                 snapshot,
                 task: Mutex::new(None),
+                commands,
+                command_inbox: tokio::sync::Mutex::new(command_inbox),
             }),
         );
         id
@@ -123,6 +148,60 @@ impl ServerGlass {
             .spawn(poll_loop(target_id, Arc::clone(&target)));
         *slot = Some(handle);
         Ok(())
+    }
+
+    /// Run one command on the host and wait for what it printed.
+    ///
+    /// Blocks until the command finishes, so call it off the UI thread. It runs on the connection
+    /// the readings already use — one round trip, no second sign-in — which also means the host
+    /// must be online: there is no queueing a command for a machine that is not answering.
+    ///
+    /// **Not a terminal.** No PTY is allocated, so anything interactive (`top`, `vim`, a `sudo`
+    /// password prompt) will produce nothing useful or hang until the timeout. That limit is the
+    /// honest shape of the existing transport, and the UIs say so rather than hiding it.
+    pub fn run_command(&self, target_id: String, command: String) -> Result<CommandResult, SgError> {
+        let target = self.target(&target_id)?;
+        let command = command.trim().to_string();
+        if command.is_empty() {
+            return Ok(CommandResult {
+                output: String::new(),
+                exit_code: 0,
+                elapsed_ms: 0,
+            });
+        }
+
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        target
+            .commands
+            .send((command, reply))
+            .map_err(|_| SgError::Connection {
+                detail: "This server is not connected.".into(),
+                recoverable: true,
+            })?;
+
+        // A bounded wait: a command that never returns must not leave the caller's thread parked
+        // for the life of the app. Sixty seconds is long enough for a package list and short
+        // enough to notice.
+        self.runtime.block_on(async {
+            match tokio::time::timeout(std::time::Duration::from_secs(60), answer).await {
+                Ok(Ok(Ok(result))) => Ok(result),
+                Ok(Ok(Err(detail))) => Err(SgError::Connection {
+                    detail,
+                    recoverable: true,
+                }),
+                // The poll loop dropped the reply channel: the connection went down under it.
+                Ok(Err(_)) => Err(SgError::Connection {
+                    detail: "The connection dropped before the command finished.".into(),
+                    recoverable: true,
+                }),
+                Err(_) => Err(SgError::Connection {
+                    detail: "The command did not finish within 60 seconds. Interactive programs \
+                             such as top or vim cannot run here."
+                        .into(),
+                    recoverable: true,
+                }),
+            }
+        })
     }
 
     /// Stop refreshing and drop the connection.
@@ -248,7 +327,41 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
             // Subtract the time the tick took, so a slow host produces a steady cadence rather
             // than drifting further behind on every refresh.
             let elapsed = tick_started.elapsed();
-            tokio::time::sleep(interval.saturating_sub(elapsed)).await;
+            let until_next = tokio::time::sleep(interval.saturating_sub(elapsed));
+            tokio::pin!(until_next);
+
+            // Commands run in the gap between refreshes rather than waiting for one. Someone who
+            // just pressed Return should not wait out a ten-second refresh interval, and a slow
+            // command must not delay the readings any longer than it has to.
+            loop {
+                let mut inbox = target.command_inbox.lock().await;
+                tokio::select! {
+                    _ = &mut until_next => break,
+                    job = inbox.recv() => {
+                        let Some((command, reply)) = job else { break };
+                        drop(inbox);
+                        let answer = runtime
+                            .run_command(&command)
+                            .await
+                            .map(|out| CommandResult {
+                                output: out.output,
+                                exit_code: out.exit_code,
+                                elapsed_ms: out.elapsed_ms,
+                            })
+                            .map_err(|e| e.to_string());
+                        let failed = answer.is_err();
+                        // The receiver may be gone if the caller timed out; its answer is simply
+                        // discarded.
+                        let _ = reply.send(answer);
+                        if failed {
+                            // `run_command` has already moved the runtime into Reconnecting or
+                            // Failed; surface it and rebuild the session.
+                            publish(ConnectionState::from(runtime.state()));
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         if let TargetState::Failed {
@@ -325,6 +438,7 @@ mod tests {
             user: "root".into(),
             auth_kind: "agent".into(),
             key_path: None,
+            key_text: None,
             secret: None,
             host_key_policy: "strict".into(),
             refresh_ms: 1000,

@@ -45,7 +45,10 @@ targets:
         group: Generated
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass
+        # Distinct from the app's. An embedded framework sharing the app's identifier makes the
+        # bundle unloadable — "same identifier as bundle at …" — and installation fails outright.
+        # It only ever appeared to work when upgrading over an already-installed copy.
+        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass.ffi
         # Names the icon inside Assets.xcassets; without it Xcode compiles the catalog but the app
         # still ships with the blank default.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon.ffi
@@ -67,7 +70,7 @@ targets:
       - target: ServerGlassFFI
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass
+        PRODUCT_BUNDLE_IDENTIFIER: cloud.lazarev.serverglass.ui
         # Names the icon inside Assets.xcassets; without it Xcode compiles the catalog but the app
         # still ships with the blank default.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon.ui

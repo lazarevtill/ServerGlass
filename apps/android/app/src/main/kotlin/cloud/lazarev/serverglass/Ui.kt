@@ -21,10 +21,14 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -285,6 +289,9 @@ fun SimpleHostScreen(
     model: CoreModel,
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
+    onCommand: (() -> Unit)? = null,
+    onShowTechnical: () -> Unit = {},
 ) {
     val snapshot = host.snapshot
     val name = snapshot.displayName.ifEmpty { host.address }
@@ -342,6 +349,24 @@ fun SimpleHostScreen(
                         fontSize = 14.sp,
                         modifier = Modifier.weight(1f),
                     )
+                    onCommand?.let {
+                        IconButton(onClick = it) {
+                            Icon(
+                                Icons.Outlined.Terminal,
+                                contentDescription = "Run a command on this server",
+                                tint = Theme.secondary,
+                            )
+                        }
+                    }
+                    onEdit?.let {
+                        IconButton(onClick = it) {
+                            Icon(
+                                Icons.Outlined.Edit,
+                                contentDescription = "Edit this server",
+                                tint = Theme.secondary,
+                            )
+                        }
+                    }
                     IconButton(onClick = { confirmingRemoval = true }) {
                         Icon(
                             Icons.Outlined.Delete,
@@ -432,7 +457,43 @@ fun SimpleHostScreen(
                 )
             }
         }
+        item { TechnicalToggle(onShowTechnical) }
         item { Spacer(Modifier.height(20.dp)) }
+    }
+}
+
+/**
+ * The way to everything else.
+ *
+ * Captioned with what is actually behind it: "show every reading" alone is a promise a reader has
+ * no reason to believe, and on Android there was nothing behind it at all until now.
+ */
+@Composable
+private fun TechnicalToggle(onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Theme.card)
+            .border(1.dp, Theme.info.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                "Show every reading",
+                color = Theme.primary,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                "Per-core CPU, network, disks, temperatures",
+                color = Theme.secondary,
+                fontSize = 11.sp,
+            )
+        }
+        Text("›", color = Theme.tertiary, fontSize = 18.sp)
     }
 }
 
@@ -443,8 +504,15 @@ fun SimpleHostScreen(
  * only route in was a debug command-line intent. On a phone that is not a sparse design, it is a
  * dead end.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun HostList(model: CoreModel, onAdd: () -> Unit, modifier: Modifier = Modifier) {
+fun HostList(
+    model: CoreModel,
+    onAdd: () -> Unit,
+    onEdit: (String) -> Unit = {},
+    onCommand: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     Column(modifier.fillMaxSize().background(Theme.background)) {
         Row(
             Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 14.dp, bottom = 6.dp),
@@ -477,7 +545,12 @@ fun HostList(model: CoreModel, onAdd: () -> Unit, modifier: Modifier = Modifier)
                                 if (selected) Theme.border else Color.Transparent,
                                 RoundedCornerShape(12.dp),
                             )
-                            .clickable { model.selection = host.id }
+                            .combinedClickable(
+                                onClick = { model.selection = host.id },
+                                // Long press is the Android idiom for "act on this row", and the
+                                // only one available without a swipe library.
+                                onLongClick = { onEdit(host.id) },
+                            )
                             .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

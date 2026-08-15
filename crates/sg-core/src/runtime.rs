@@ -35,6 +35,18 @@ pub struct TickSummary {
     pub requests: usize,
 }
 
+/// What one command printed, and how it ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommandOutput {
+    /// Everything the command wrote, standard error included — the two are interleaved on the
+    /// wire and separating them would need a second channel and lose the ordering that makes an
+    /// error message make sense next to the output it interrupted.
+    pub output: String,
+    /// -1 when the host did not report one.
+    pub exit_code: i32,
+    pub elapsed_ms: u64,
+}
+
 pub struct TargetRuntime {
     target: TargetId,
     spec: ConnectionSpec,
@@ -187,6 +199,56 @@ impl TargetRuntime {
         self.store.retain_entities(&present);
 
         Ok(tick)
+    }
+
+    /// Run one command on the host and return what it printed.
+    ///
+    /// Reuses the session the collectors already hold, so a command costs one round trip and no
+    /// new authentication. Running it as its own batch rather than folding it into the refresh is
+    /// deliberate: a person waiting on `systemctl status` should not wait for the next tick, and a
+    /// slow command must not delay the readings.
+    ///
+    /// This is not a terminal. There is no PTY, so nothing interactive works — `top`, `vim`, `sudo`
+    /// prompting for a password will hang or produce nothing useful. It is the honest shape of
+    /// what the existing transport can do, and the UIs say so.
+    ///
+    /// The invariant still holds: this runs what the *user* typed. ServerGlass itself continues to
+    /// only ever read.
+    pub async fn run_command(&mut self, command: &str) -> TransportResult<CommandOutput> {
+        let Some(session) = self.session.as_mut() else {
+            return Err(TransportError::Closed);
+        };
+
+        // `sh -c` rather than splitting on whitespace: people type pipes, redirects and quotes,
+        // and a command runner that silently mangles them is worse than none.
+        //
+        // Wrapped in a group with `2>&1` because the transport captures only standard output, and
+        // a failing command writes its explanation to standard error — `ls /nope` would otherwise
+        // come back as exit code 2 and an empty screen. The group is what makes the redirect apply
+        // to the whole thing rather than only the last command of a pipeline; a redirect the user
+        // writes themselves is inside it and still wins.
+        let request = Request::exec(["sh", "-c", &format!("{{ {command}\n}} 2>&1")]);
+        let started = std::time::Instant::now();
+        let responses = match session.batch(std::slice::from_ref(&request)).await {
+            Ok(responses) => responses,
+            Err(error) => {
+                self.on_disconnect(&error);
+                return Err(error);
+            }
+        };
+
+        Ok(CommandOutput {
+            // Non-zero exits are the interesting case, so unlike collection this keeps the body
+            // whatever the status was: a failed command's message *is* the answer.
+            // `text()` deliberately hides the body of a failed request, which is right for
+            // collectors and wrong here: a failed command's message *is* the answer.
+            output: responses
+                .get(&request)
+                .map(|r| r.body.clone())
+                .unwrap_or_default(),
+            exit_code: responses.get(&request).map(|r| r.exit_code).unwrap_or(-1),
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        })
     }
 
     /// The host entity, once connected.

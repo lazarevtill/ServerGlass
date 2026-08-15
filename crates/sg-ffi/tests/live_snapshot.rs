@@ -20,6 +20,7 @@ fn fixture_config(port: u16, refresh_ms: u64) -> TargetConfig {
         user: "root".into(),
         auth_kind: "key".into(),
         key_path: Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/id_test").to_string()),
+        key_text: None,
         secret: None,
         // Fixture host keys are regenerated on every image build.
         host_key_policy: "accept_any".into(),
@@ -322,4 +323,111 @@ fn unrecoverable_failures_are_reported_and_not_retried() {
     }
 
     core.remove_target(id).expect("remove");
+}
+
+/// The whole pasted-key path, through the FFI surface the apps actually call.
+///
+/// The transport test proves `Auth::KeyText` works; this proves the app-facing config reaches it —
+/// `auth_kind: "key_text"` with the key in `key_text` and no path anywhere.
+#[test]
+fn a_pasted_key_config_connects_and_collects() {
+    if !fixture_up(DEBIAN_PORT) {
+        return;
+    }
+    let key = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/id_test"
+    ))
+    .expect("read the fixture key");
+
+    let core = ServerGlass::new();
+    let id = core.add_target(TargetConfig {
+        host: "127.0.0.1".into(),
+        port: DEBIAN_PORT,
+        user: "root".into(),
+        auth_kind: "key_text".into(),
+        key_path: None,
+        key_text: Some(key),
+        secret: None,
+        host_key_policy: "accept_any".into(),
+        refresh_ms: 500,
+    });
+    core.start(id.clone()).expect("start");
+
+    let mut online = false;
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(250));
+        let snapshot = core.snapshot(id.clone()).expect("snapshot");
+        if snapshot.state == ConnectionState::Online && !snapshot.gauges.is_empty() {
+            online = true;
+            break;
+        }
+        if let ConnectionState::Failed { message, .. } = &snapshot.state {
+            panic!("pasted key rejected: {message}");
+        }
+    }
+    assert!(online, "never came online with a pasted key");
+}
+
+/// Running a command on the connection the readings already use.
+#[test]
+fn commands_run_on_the_live_session() {
+    if !fixture_up(DEBIAN_PORT) {
+        return;
+    }
+    let core = ServerGlass::new();
+    let id = core.add_target(fixture_config(DEBIAN_PORT, 500));
+    core.start(id.clone()).expect("start");
+
+    // Wait for the session the command will borrow.
+    let mut online = false;
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(250));
+        if core.snapshot(id.clone()).expect("snapshot").state == ConnectionState::Online {
+            online = true;
+            break;
+        }
+    }
+    assert!(online, "never came online");
+
+    let before = core.snapshot(id.clone()).expect("snapshot").round_trips;
+
+    let hello = core
+        .run_command(id.clone(), "echo hello from serverglass".into())
+        .expect("run echo");
+    assert_eq!(hello.output.trim(), "hello from serverglass");
+    assert_eq!(hello.exit_code, 0);
+
+    // Shell syntax has to survive: people type pipes and quotes, and a runner that splits on
+    // whitespace would turn this into nonsense.
+    let piped = core
+        .run_command(id.clone(), "printf 'a\\nb\\nc\\n' | wc -l".into())
+        .expect("run pipeline");
+    assert_eq!(piped.output.trim(), "3");
+
+    // A failed command's message is the answer, so unlike collection the body is kept.
+    let failed = core
+        .run_command(id.clone(), "ls /definitely-not-here".into())
+        .expect("run failing command");
+    assert_ne!(failed.exit_code, 0);
+    assert!(
+        failed.output.to_lowercase().contains("no such file"),
+        "the error text was dropped: {failed:?}"
+    );
+
+    // One round trip per command, on the session that was already open. The count is republished
+    // by the next tick rather than by the command, so wait for one — three commands must show up
+    // as more than the three refreshes that could have happened meanwhile.
+    let mut after = before;
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(250));
+        after = core.snapshot(id.clone()).expect("snapshot").round_trips;
+        if after >= before + 3 {
+            break;
+        }
+    }
+    assert!(
+        after >= before + 3,
+        "commands should run on the counted session: {before} -> {after}"
+    );
 }

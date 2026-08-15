@@ -104,21 +104,42 @@ class HostStore(context: Context) {
         config.edit().putString(KEY, array.toString()).apply()
     }
 
-    fun secret(id: String): String? = secrets.getString(id, null)?.ifEmpty { null }
+    /** Which secret. A host can have both — a pasted key *and* the passphrase protecting it. */
+    enum class Kind(val suffix: String) {
+        PASSWORD(""),
+        KEY_TEXT(".key"),
+    }
 
-    fun setSecret(id: String, secret: String?) {
+    fun secret(id: String, kind: Kind = Kind.PASSWORD): String? =
+        secrets.getString(id + kind.suffix, null)?.ifEmpty { null }
+
+    fun setSecret(id: String, secret: String?, kind: Kind = Kind.PASSWORD) {
+        val account = id + kind.suffix
         secrets.edit().apply {
-            if (secret.isNullOrEmpty()) remove(id) else putString(id, secret)
+            if (secret.isNullOrEmpty()) remove(account) else putString(account, secret)
         }.apply()
+    }
+
+    /**
+     * Whether the technical view was the last one showing.
+     *
+     * A view preference rather than a host record, but it belongs to the same store: two
+     * preference files for one app is two things to keep in step for no benefit.
+     */
+    fun showTechnical(): Boolean = config.getBoolean(SHOW_TECHNICAL, false)
+
+    fun setShowTechnical(value: Boolean) {
+        config.edit().putBoolean(SHOW_TECHNICAL, value).apply()
     }
 
     /** Remove a host's stored record and its secret together. */
     fun forget(id: String) {
         save(load().filterNot { it.id == id })
-        secrets.edit().remove(id).apply()
+        secrets.edit().remove(id).remove(id + Kind.KEY_TEXT.suffix).apply()
     }
 
     private companion object {
         const val KEY = "hosts.v1"
+        const val SHOW_TECHNICAL = "show_technical"
     }
 }

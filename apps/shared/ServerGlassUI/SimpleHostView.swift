@@ -108,22 +108,38 @@ struct SimpleHostView: View {
         }
     }
 
+    /// The way to everything else.
+    ///
+    /// It used to be grey secondary text on a grey card, which reads as a footnote rather than a
+    /// control — on a phone, where it sits below the fold, that was indistinguishable from the
+    /// technical view not existing. Tinted and captioned, it now looks like the door it is.
     private var technicalToggle: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) { showTechnical = true }
         } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 11))
-                Text("Show every reading")
+            HStack(spacing: 11) {
+                Image(systemName: "chart.bar.doc.horizontal")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Theme.info)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show every reading")
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(Theme.primary)
+                    Text("Per-core CPU, network, disks, temperatures")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.secondary)
+                }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 10))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.tertiary)
             }
-            .font(.system(size: 13))
-            .foregroundStyle(Theme.secondary)
             .padding(13)
             .frame(maxWidth: .infinity)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.panelBorder))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Theme.info.opacity(0.35)))
         }
         .buttonStyle(.plain)
     }
