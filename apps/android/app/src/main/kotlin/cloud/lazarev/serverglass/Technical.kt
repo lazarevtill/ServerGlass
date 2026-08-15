@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -124,14 +126,24 @@ fun TechnicalHostScreen(
                 )
             }
         } else {
-            item { OverviewPanel(snapshot, format, model) }
-            item { CpuPanel(snapshot, format) }
-            item { MemoryPanel(snapshot, format) }
-            item { NetworkPanel(snapshot, format) }
-            item { DiskPanel(snapshot, format) }
+            // Deliberately the same order as the Apple apps, and the same pairing: two panels
+            // side by side once there is room for them, stacked when there is not.
+            item { OverviewPanel(snapshot, format) }
+            item {
+                Pair(
+                    first = { CpuPanel(snapshot, format, it) },
+                    second = { MemoryPanel(snapshot, format, it) },
+                )
+            }
+            item {
+                Pair(
+                    first = { NetworkPanel(snapshot, format, it) },
+                    second = { DiskPanel(snapshot, format, it) },
+                )
+            }
+            item { ProcessPanel(snapshot, model) }
             item { FilesystemPanel(snapshot, format) }
             item { SensorPanel(snapshot, format) }
-            item { ProcessPanel(snapshot, model) }
             item { GroupPanel(snapshot, "Sockets & TCP", format) }
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -140,41 +152,120 @@ fun TechnicalHostScreen(
 
 // ---------------------------------------------------------------- panels
 
+/**
+ * Two panels side by side when there is room, stacked when there is not.
+ *
+ * The same 680dp threshold the Apple apps use, and measured rather than derived from a size class
+ * for the same reason: the case that matters is a width that changes while the app is running —
+ * an unfolding phone, an iPad entering Split View — and a measured width re-evaluates on every one
+ * of those.
+ */
 @Composable
-private fun OverviewPanel(
-    snapshot: TargetSnapshot,
-    format: (MetricGauge) -> String,
-    model: CoreModel,
+private fun Pair(
+    first: @Composable (Modifier) -> Unit,
+    second: @Composable (Modifier) -> Unit,
 ) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth >= 680.dp) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                first(Modifier.weight(1f))
+                second(Modifier.weight(1f))
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                first(Modifier)
+                second(Modifier)
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverviewPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> String) {
     Panel("Overview") {
         // A grid rather than a row: six rings do not fit across a phone, and the same view has to
         // work unfolded without a second layout existing.
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val columns = (maxWidth / 108.dp).toInt().coerceIn(2, 6)
-            val rings = listOf("cpu_usage", "mem_usage", "disk_usage", "swap_usage", "cpu_temp")
-                .mapNotNull { snapshot.gauge(it) }
+            // The same readings the Apple overview shows, in the same order.
+            val tiles = buildList {
+                snapshot.gauge("cpu_usage")?.let {
+                    add(Overview(it, format(it), "${snapshot.cpuCount} cores"))
+                }
+                snapshot.gauge("mem_usage")?.let {
+                    add(Overview(it, format(it), snapshot.pair("mem_used", "mem_total", format)))
+                }
+                snapshot.gauge("disk_usage")?.let { add(Overview(it, format(it), "root")) }
+                snapshot.gauge("swap_usage")?.let {
+                    add(Overview(it, format(it), snapshot.pair("swap_used", "swap_total", format)))
+                }
+                snapshot.gauge("cpu_temp")?.let { add(Overview(it, format(it), "processor")) }
+                snapshot.gauge("load1")?.let {
+                    val five = snapshot.gauge("load5")?.value
+                    val fifteen = snapshot.gauge("load15")?.value
+                    add(
+                        Overview(
+                            it,
+                            "%.2f".format(it.value),
+                            if (five != null && fifteen != null) {
+                                "%.2f · %.2f".format(five, fifteen)
+                            } else {
+                                null
+                            },
+                        ),
+                    )
+                }
+                snapshot.gauge("uptime")?.let { add(Overview(it, format(it), null, ring = false)) }
+            }
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                rings.chunked(columns).forEach { row ->
+                tiles.chunked(columns).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { gauge ->
+                        row.forEach { tile ->
                             Column(
                                 Modifier.weight(1f),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                RingGauge(
-                                    fraction = gauge.fraction(),
-                                    color = gauge.severity(),
-                                    label = format(gauge),
-                                    diameter = 74.dp,
-                                )
+                                if (tile.ring) {
+                                    RingGauge(
+                                        fraction = tile.gauge.fraction(),
+                                        color = tile.gauge.severity(),
+                                        label = tile.caption,
+                                        diameter = 74.dp,
+                                    )
+                                } else {
+                                    // Uptime has no maximum, so it gets a number rather than a
+                                    // ring: a ring implies a proportion of something.
+                                    Box(
+                                        Modifier.size(74.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            tile.caption,
+                                            color = Theme.primary,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = FontFamily.Monospace,
+                                            textAlign = TextAlign.Center,
+                                        )
+                                    }
+                                }
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    gauge.label,
-                                    color = Theme.secondary,
+                                    tile.gauge.label,
+                                    color = Theme.primary,
                                     fontSize = 11.sp,
                                     maxLines = 1,
                                 )
+                                tile.detail?.let {
+                                    Text(
+                                        it,
+                                        color = Theme.tertiary,
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                }
                             }
                         }
                         // Keeps a short last row aligned with the one above instead of centred.
@@ -186,22 +277,77 @@ private fun OverviewPanel(
     }
 }
 
-@Composable
-private fun CpuPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> String) {
-    val cores = snapshot.entities(ofKind = "cpu")
-        .sortedBy { it.display.filter(Char::isDigit).toIntOrNull() ?: 0 }
+/** One overview tile: a reading, its headline number, and the sentence under it. */
+private data class Overview(
+    val gauge: MetricGauge,
+    val caption: String,
+    val detail: String?,
+    val ring: Boolean = true,
+)
 
-    Panel("CPU", subtitle = "${snapshot.cpuCount} cores") {
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            snapshot.group("CPU")?.gauges?.forEach { gauge ->
-                KeyValueRow(gauge.label, format(gauge))
-            }
+/** `used / total`, e.g. `49.4 GiB / 62.4 GiB`. */
+private fun TargetSnapshot.pair(
+    used: String,
+    total: String,
+    format: (MetricGauge) -> String,
+): String? {
+    val u = gauge(used) ?: return null
+    val t = gauge(total) ?: return null
+    return "${format(u)} / ${format(t)}"
+}
+
+@Composable
+private fun CpuPanel(
+    snapshot: TargetSnapshot,
+    format: (MetricGauge) -> String,
+    modifier: Modifier = Modifier,
+) {
+    val cores = snapshot.entities(ofKind = "cpu")
+        .sortedBy { it.display.toIntOrNull() ?: 0 }
+
+    Panel("CPU", subtitle = "${snapshot.cpuCount} logical", modifier = modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            StackedBar(
+                listOf(
+                    Segment("User", snapshot.gauge("cpu_user")?.value ?: 0.0, Theme.info),
+                    Segment("System", snapshot.gauge("cpu_system")?.value ?: 0.0, Theme.warn),
+                    Segment("I/O wait", snapshot.gauge("cpu_iowait")?.value ?: 0.0, Theme.bad),
+                    Segment("Steal", snapshot.gauge("cpu_steal")?.value ?: 0.0, Color(0xFFB07BE0)),
+                ),
+            )
+
             if (cores.isNotEmpty()) {
-                Spacer(Modifier.height(4.dp))
-                cores.forEach { core ->
-                    val usage = core.gauge("usage")
-                    if (usage != null) {
-                        CoreBar(core.display, usage, format(usage))
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val columns = (maxWidth / 130.dp).toInt().coerceAtLeast(1)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        cores.chunked(columns).forEach { row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                row.forEach { core ->
+                                    Box(Modifier.weight(1f)) {
+                                        CoreBar(
+                                            core.display,
+                                            core.gauge("usage"),
+                                            "%.0f%%".format(core.value("usage")),
+                                        )
+                                    }
+                                }
+                                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                listOf("procs_running", "procs_blocked", "ctx_switches").forEach { metric ->
+                    snapshot.gauge(metric)?.let {
+                        StatCell(
+                            it.label,
+                            format(it),
+                            Theme.primary,
+                            it.history,
+                            Modifier.weight(1f),
+                        )
                     }
                 }
             }
@@ -210,25 +356,90 @@ private fun CpuPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> String) 
 }
 
 @Composable
-private fun MemoryPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> String) {
-    Panel("Memory") {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            snapshot.group("Memory")?.gauges?.forEach { gauge ->
-                KeyValueRow(gauge.label, format(gauge))
+private fun MemoryPanel(
+    snapshot: TargetSnapshot,
+    format: (MetricGauge) -> String,
+    modifier: Modifier = Modifier,
+) {
+    Panel("Memory", modifier = modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            snapshot.gauge("mem_usage")?.let {
+                CapacityRow("Physical", it, snapshot.pair("mem_used", "mem_total", format))
+            }
+            snapshot.gauge("swap_usage")?.let {
+                CapacityRow("Swap", it, snapshot.pair("swap_used", "swap_total", format))
+            }
+
+            // The breakdown is deliberately a plain list of quantities: on a host running ZFS
+            // these do not sum to the total (ARC is neither free nor counted as cached), so
+            // rendering them as a stacked bar would draw a picture that is simply untrue.
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                listOf("mem_available", "mem_free", "mem_cached", "mem_buffers").forEach { metric ->
+                    snapshot.gauge(metric)?.let { KeyValueRow(it.label, format(it)) }
+                }
+            }
+        }
+    }
+}
+
+/** One slice of the CPU stacked bar. */
+private data class Segment(val label: String, val percent: Double, val color: Color)
+
+/**
+ * How the processor's time splits, as one bar.
+ *
+ * The same widget the Apple apps use: four numbers that add up belong in one bar, not in four
+ * rows a reader has to add up themselves.
+ */
+@Composable
+private fun StackedBar(segments: List<Segment>) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Theme.track),
+        ) {
+            segments.forEach { segment ->
+                val share = (segment.percent / 100.0).coerceIn(0.0, 1.0).toFloat()
+                if (share > 0f) {
+                    Box(Modifier.fillMaxHeight().weight(share).background(segment.color))
+                }
+            }
+            val used = segments.sumOf { it.percent }.coerceIn(0.0, 100.0).toFloat() / 100f
+            if (used < 1f) Box(Modifier.fillMaxHeight().weight(1f - used))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            segments.forEach { segment ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(5.dp).clip(CircleShape).background(segment.color))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "${segment.label} ${"%.1f".format(segment.percent)}%",
+                        color = Theme.tertiary,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun NetworkPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> String) {
+private fun NetworkPanel(
+    snapshot: TargetSnapshot,
+    format: (MetricGauge) -> String,
+    modifier: Modifier = Modifier,
+) {
     // Ranked by combined traffic. Sorting on receive alone buries a send-heavy uplink below idle
     // interfaces, and the cap then hides it entirely.
     val interfaces = snapshot.entities(ofKind = "net")
         .filter { (it.value("rx_bytes") + it.value("tx_bytes")) > 0.0 }
         .sortedByDescending { it.value("rx_bytes") + it.value("tx_bytes") }
 
-    Panel("Network", subtitle = shown(interfaces.size, cap = 6)) {
+    Panel("Network", subtitle = shown(interfaces.size, cap = 6), modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 snapshot.gauge("net_rx")?.let {
@@ -250,11 +461,15 @@ private fun NetworkPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> Stri
 }
 
 @Composable
-private fun DiskPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> String) {
+private fun DiskPanel(
+    snapshot: TargetSnapshot,
+    format: (MetricGauge) -> String,
+    modifier: Modifier = Modifier,
+) {
     val disks = snapshot.entities(ofKind = "disk")
         .sortedByDescending { it.value("read_bytes") + it.value("write_bytes") }
 
-    Panel("Disk I/O", subtitle = shown(disks.size, cap = 6)) {
+    Panel("Disk I/O", subtitle = shown(disks.size, cap = 6), modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 snapshot.gauge("disk_read")?.let {
@@ -360,6 +575,12 @@ private fun ProcessPanel(snapshot: TargetSnapshot, model: CoreModel) {
 
     Panel("Processes", subtitle = "top ${snapshot.topProcesses.size}") {
         Column {
+            Row(Modifier.fillMaxWidth().padding(bottom = 5.dp)) {
+                Text("PID", color = Theme.tertiary, fontSize = 9.sp, modifier = Modifier.width(48.dp))
+                Text("COMMAND", color = Theme.tertiary, fontSize = 9.sp, modifier = Modifier.weight(1f))
+                Text("CPU", color = Theme.tertiary, fontSize = 9.sp, modifier = Modifier.width(52.dp))
+                Text("MEMORY", color = Theme.tertiary, fontSize = 9.sp, modifier = Modifier.width(68.dp))
+            }
             snapshot.topProcesses.forEach { process ->
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 5.dp),
@@ -433,10 +654,11 @@ private fun GroupPanel(
 private fun Panel(
     title: String,
     subtitle: String? = null,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(Theme.panel)
@@ -473,7 +695,7 @@ private fun KeyValueRow(label: String, value: String, emphasis: Color = Theme.pr
 }
 
 @Composable
-private fun CoreBar(name: String, gauge: MetricGauge, value: String) {
+private fun CoreBar(name: String, gauge: MetricGauge?, value: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             name,
@@ -491,10 +713,10 @@ private fun CoreBar(name: String, gauge: MetricGauge, value: String) {
         ) {
             Box(
                 Modifier
-                    .fillMaxWidth((gauge.fraction() ?: 0.0).toFloat())
+                    .fillMaxWidth((gauge?.fraction() ?: 0.0).toFloat())
                     .fillMaxSize()
                     .clip(RoundedCornerShape(4.dp))
-                    .background(gauge.severity()),
+                    .background(gauge?.severity() ?: Theme.good),
             )
         }
         Spacer(Modifier.width(9.dp))

@@ -116,6 +116,12 @@ struct HostDetailView: View {
                         caption: model.format(swap),
                         detail: pair("swap_used", "swap_total"))
                 }
+                if let temperature = snapshot.gauge("cpu_temp") {
+                    HeadlineRing(
+                        gauge: temperature,
+                        caption: model.format(temperature),
+                        detail: "processor")
+                }
                 if let load = snapshot.gauge("load1") {
                     HeadlineRing(
                         gauge: load,
