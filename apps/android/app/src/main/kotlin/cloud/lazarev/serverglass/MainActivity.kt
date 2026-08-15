@@ -9,7 +9,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -37,7 +40,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = Theme.background) {
-                    App(demoHost = demoHost, demoKey = demoKey)
+                    // `enableEdgeToEdge` lets the app draw behind the system bars, which is what
+                    // makes the background reach the screen edges — but content still has to be
+                    // inset out from under them, or the status bar clock lands on top of the
+                    // health card. Applied here so both panes inherit it.
+                    Box(Modifier.windowInsetsPadding(WindowInsets.systemBars)) {
+                        App(demoHost = demoHost, demoKey = demoKey)
+                    }
                 }
             }
         }
