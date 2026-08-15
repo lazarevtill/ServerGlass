@@ -22,12 +22,23 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -261,11 +272,49 @@ fun SimpleTileCard(tile: SimpleTile, ring: Dp = 104.dp, modifier: Modifier = Mod
 /**
  * The default screen, matching the Apple apps: a verdict, four readings that mean something
  * without training, and what is keeping the machine busy.
+ *
+ * `onBack` is what a phone gets and a tablet does not. In single-pane mode this screen *replaces*
+ * the host list, so without a way out the list becomes unreachable the moment a first server is
+ * added — no second server, no removal, and system back quits the app. Two panes have no such
+ * problem, because the list never leaves the screen; that is exactly why the trap was invisible on
+ * an unfolded emulator.
  */
 @Composable
-fun SimpleHostScreen(host: Host, model: CoreModel, modifier: Modifier = Modifier) {
+fun SimpleHostScreen(
+    host: Host,
+    model: CoreModel,
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
+) {
     val snapshot = host.snapshot
     val name = snapshot.displayName.ifEmpty { host.address }
+    var confirmingRemoval by remember { mutableStateOf(false) }
+
+    if (confirmingRemoval) {
+        AlertDialog(
+            onDismissRequest = { confirmingRemoval = false },
+            title = { Text("Remove $name?") },
+            text = {
+                Text(
+                    "ServerGlass stops watching it and forgets its password. The server itself " +
+                        "is not touched.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingRemoval = false
+                    onBack?.invoke()
+                    model.removeHost(host.id)
+                }) { Text("Remove", color = Theme.bad) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingRemoval = false }) { Text("Cancel") }
+            },
+            containerColor = Theme.panel,
+            titleContentColor = Theme.primary,
+            textContentColor = Theme.secondary,
+        )
+    }
 
     LazyColumn(
         modifier
@@ -274,7 +323,37 @@ fun SimpleHostScreen(host: Host, model: CoreModel, modifier: Modifier = Modifier
             .padding(horizontal = 14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { Spacer(Modifier.height(6.dp)) }
+        if (onBack != null) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to your servers",
+                            tint = Theme.primary,
+                        )
+                    }
+                    Text(
+                        "Servers",
+                        color = Theme.secondary,
+                        fontSize = 14.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { confirmingRemoval = true }) {
+                        Icon(
+                            Icons.Outlined.Delete,
+                            contentDescription = "Remove this server",
+                            tint = Theme.secondary,
+                        )
+                    }
+                }
+            }
+        } else {
+            item { Spacer(Modifier.height(6.dp)) }
+        }
         item { HealthCard(snapshot.health, name) }
 
         if (snapshot.simpleTiles.isEmpty()) {

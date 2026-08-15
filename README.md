@@ -127,6 +127,25 @@ The app opens on the plain-language summary. **Show every reading** switches to 
 dashboard — per-core CPU, memory breakdown, per-interface traffic, per-device disk I/O,
 filesystems, sockets and TCP — and the choice is remembered.
 
+### Where your servers are kept
+
+The list of servers survives closing the app, and is split in two on every platform:
+
+| | Apple | Android |
+|---|---|---|
+| Address, port, username, sign-in method | `UserDefaults` | `SharedPreferences` |
+| Password or key passphrase | Keychain, `AfterFirstUnlockThisDeviceOnly` | `EncryptedSharedPreferences`, key in the Keystore |
+
+Secrets never sit beside the rest of the host record, and are fetched per connection rather than
+held in memory for the life of the app. The Apple side is marked device-only and non-syncing: a
+server password should not travel with an iCloud restore. Removing a server erases its secret with
+it.
+
+This is the one deliberate exception to "the core owns all logic". The Keychain and the Keystore
+are operating-system facilities backed by hardware that Rust cannot reach from inside the app;
+reimplementing them in the core would mean inventing key management instead of using the one the
+platform already audits. The core stays stateless about secrets and is handed one per connection.
+
 Where the kernel supports it (4.20+ with `CONFIG_PSI`), ServerGlass reads
 [Pressure Stall Information](https://docs.kernel.org/accounting/psi.html) and prefers it for the
 health verdict. A host can sit at 100% CPU and be perfectly healthy — that is what a server is for
@@ -192,7 +211,7 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
 **Next**
 
 - Terminal (`alacritty_terminal` in the core, so one implementation serves every platform),
-  snippets, credential vault
+  snippets, SFTP file browsing
 - Declarative probes and Prometheus/OpenMetrics scraping
 - Containers and orchestration (Docker, Podman, real Kubernetes), virtualisation and hardware,
   services/databases/logs, network and external checks

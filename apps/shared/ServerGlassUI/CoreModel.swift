@@ -7,6 +7,8 @@ public struct Host: Identifiable, Equatable {
     public let id: String
     public var address: String
     public var snapshot: TargetSnapshot
+    /// Identifier of the persisted record, so removing a host can also forget its stored secret.
+    public var savedId: String = ""
 
     public var isOnline: Bool {
         if case .online = snapshot.state { return true }
@@ -61,6 +63,7 @@ public final class CoreModel: ObservableObject {
             }
         }
 
+        restore()
         addDemoHostIfRequested()
     }
 
@@ -87,7 +90,8 @@ public final class CoreModel: ObservableObject {
             secret: nil,
             // The fixture containers regenerate their host keys on every build.
             hostKeyPolicy: environment["SG_DEMO_KEY"] == nil ? "strict" : "accept_any",
-            refreshMs: 1000
+            refreshMs: 1000,
+            persist: false
         )
     }
 
@@ -104,34 +108,80 @@ public final class CoreModel: ObservableObject {
         keyPath: String?,
         secret: String?,
         hostKeyPolicy: String,
-        refreshMs: UInt64
+        refreshMs: UInt64,
+        /// False for the development demo host, which would otherwise accumulate a duplicate
+        /// saved record on every launch.
+        persist: Bool = true
     ) {
-        let config = TargetConfig(
-            host: address,
-            port: port,
-            user: user,
-            authKind: authKind,
+        var saved = HostStore.SavedHost(
+            address: address, port: port, user: user, authKind: authKind,
             keyPath: keyPath?.isEmpty == true ? nil : keyPath,
-            secret: secret?.isEmpty == true ? nil : secret,
-            hostKeyPolicy: hostKeyPolicy,
-            refreshMs: refreshMs
-        )
+            hostKeyPolicy: hostKeyPolicy, refreshMs: refreshMs)
 
+        if persist {
+            // The secret goes to the Keychain and nowhere else; the saved record never carries it.
+            Keychain.setSecret(secret, for: saved.id)
+            var stored = HostStore.load()
+            stored.append(saved)
+            HostStore.save(stored)
+        } else {
+            // Not persisted, so the secret has to travel with the config rather than the Keychain.
+            ephemeralSecrets[saved.id] = secret
+        }
+
+        // The core's own target id is what everything else keys on, so the saved record adopts it.
+        let id = start(saved)
+        saved.id = id
+        _ = saved
+    }
+
+    /// Secrets for hosts that were deliberately not saved.
+    private var ephemeralSecrets: [String: String?] = [:]
+
+    /// Bring a saved host up: hand its config to the core, start polling, and show it.
+    @discardableResult
+    private func start(_ saved: HostStore.SavedHost) -> String {
+        var config = HostStore.config(for: saved)
+        if let ephemeral = ephemeralSecrets[saved.id] {
+            config.secret = ephemeral
+        }
         let id = core.addTarget(config: config)
         do {
             try core.start(targetId: id)
         } catch {
             lastError = "\(error)"
         }
-
         if let snapshot = try? core.snapshot(targetId: id) {
-            hosts.append(Host(id: id, address: "\(user)@\(address)", snapshot: snapshot))
+            hosts.append(
+                Host(
+                    id: id, address: "\(saved.user)@\(saved.address)", snapshot: snapshot,
+                    savedId: saved.id))
         }
         if selection == nil { selection = id }
+        return id
+    }
+
+    /// Reconnect everything that was added in a previous session.
+    private func restore() {
+        for saved in HostStore.load() {
+            start(saved)
+        }
     }
 
     public func removeHost(id: String) {
         try? core.removeTarget(targetId: id)
+
+        // Forget the stored record and its Keychain entry too, or removing a host from the list
+        // would leave its password behind and the host itself would return on next launch.
+        if let savedId = hosts.first(where: { $0.id == id })?.savedId {
+            var stored = HostStore.load()
+            if let doomed = stored.first(where: { $0.id == savedId }) {
+                HostStore.forget(doomed)
+            }
+            stored.removeAll { $0.id == savedId }
+            HostStore.save(stored)
+        }
+
         hosts.removeAll { $0.id == id }
         if selection == id { selection = hosts.first?.id }
     }

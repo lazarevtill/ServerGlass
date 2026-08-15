@@ -2,6 +2,7 @@ package cloud.lazarev.serverglass
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -90,12 +91,26 @@ fun App(model: CoreModel = viewModel(), demoHost: String? = null, demoKey: Strin
     val selected = model.host(model.selection) ?: model.hosts.firstOrNull()
     var addingServer by remember { mutableStateOf(false) }
 
+    // Two panes always show a detail, so the list highlight should follow it. One pane must not
+    // select anything on its own — see the note in CoreModel.start.
+    LaunchedEffect(twoPane, model.hosts.size) {
+        if (twoPane && model.selection == null) model.selection = model.hosts.firstOrNull()?.id
+    }
+
+    // Without this, system back on a phone quits the app from the detail screen instead of
+    // returning to the list.
+    BackHandler(enabled = !twoPane && model.selection != null) { model.selection = null }
+
     if (twoPane && model.hosts.isNotEmpty()) {
         TwoPane(model = model, fold = fold, selected = selected, onAdd = { addingServer = true })
     } else {
         Box(Modifier.fillMaxSize().background(Theme.background)) {
             if (selected != null && model.selection != null) {
-                SimpleHostScreen(host = selected, model = model)
+                SimpleHostScreen(
+                    host = selected,
+                    model = model,
+                    onBack = { model.selection = null },
+                )
             } else {
                 HostList(model = model, onAdd = { addingServer = true })
             }

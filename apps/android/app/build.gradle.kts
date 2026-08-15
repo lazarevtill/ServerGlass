@@ -12,8 +12,8 @@ android {
         applicationId = "cloud.lazarev.serverglass"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
     }
 
     // Android will not install an unsigned APK at all — unlike macOS, there is no unsigned
@@ -82,6 +82,9 @@ dependencies {
     implementation("androidx.compose.material3:material3-window-size-class")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+
+    // Passwords and passphrases, encrypted with a key held in the Android Keystore.
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // UniFFI's Kotlin bindings call into the .so through JNA; the `@aar` classifier is the
     // Android-native build, and the plain jar will not load at runtime.

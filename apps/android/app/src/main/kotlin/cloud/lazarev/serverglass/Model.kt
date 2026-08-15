@@ -1,10 +1,12 @@
 package cloud.lazarev.serverglass
 
+import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -18,6 +20,8 @@ data class Host(
     val id: String,
     val address: String,
     val snapshot: TargetSnapshot,
+    /** Identifier of the persisted record, so removing a host also forgets its stored secret. */
+    val savedId: String = "",
 )
 
 /**
@@ -28,13 +32,20 @@ data class Host(
  * schedules or decides anything — the health verdicts, the plain-language wording and the number
  * formatting all come from Rust, so this app says exactly what the Mac and iPhone say.
  */
-class CoreModel : ViewModel() {
+class CoreModel(application: Application) : AndroidViewModel(application) {
     private val core = ServerGlass()
+    private val store = HostStore(application)
 
     var hosts by mutableStateOf<List<Host>>(emptyList())
         private set
     var selection by mutableStateOf<String?>(null)
     var showTechnical by mutableStateOf(false)
+
+    /** False when the Keystore was unavailable and secrets fell back to plain preferences. */
+    val secretsAreHardwareBacked: Boolean get() = store.secretsAreHardwareBacked
+
+    /** Secrets for hosts that were deliberately not saved. */
+    private val ephemeralSecrets = mutableMapOf<String, String?>()
 
     init {
         viewModelScope.launch {
@@ -42,6 +53,49 @@ class CoreModel : ViewModel() {
                 delay(500)
                 poll()
             }
+        }
+        restore()
+    }
+
+    /** Reconnect everything added in a previous session. */
+    private fun restore() {
+        store.load().forEach { start(it) }
+    }
+
+    /**
+     * Bring a saved host up: hand its config to the core, start polling, and show it.
+     *
+     * The secret is read here rather than held beside the rest of the host, so it exists in memory
+     * only for as long as building the config takes.
+     */
+    private fun start(saved: HostStore.SavedHost) {
+        val config = TargetConfig(
+            host = saved.address,
+            port = saved.port,
+            user = saved.user,
+            authKind = saved.authKind,
+            keyPath = saved.keyPath,
+            secret = if (ephemeralSecrets.containsKey(saved.id)) {
+                ephemeralSecrets[saved.id]
+            } else {
+                store.secret(saved.id)
+            },
+            hostKeyPolicy = saved.hostKeyPolicy,
+            refreshMs = saved.refreshMs,
+        )
+
+        viewModelScope.launch {
+            val id = withContext(Dispatchers.IO) {
+                val id = core.addTarget(config)
+                core.start(id)
+                id
+            }
+            // Deliberately does not select the new host. On a phone `selection` means "the user
+            // navigated into a server" and the detail screen replaces the list, so selecting
+            // automatically would drop someone into detail on launch with the list — and the Add
+            // button with it — out of reach. Two-pane layouts, where the list never leaves the
+            // screen, opt into a default selection themselves.
+            hosts = hosts + Host(id, "${saved.user}@${saved.address}", core.snapshot(id), saved.id)
         }
     }
 
@@ -54,32 +108,42 @@ class CoreModel : ViewModel() {
         secret: String?,
         trustOnFirstUse: Boolean,
         refreshMs: ULong = 1000UL,
+        /** False for the development demo host, which would otherwise be saved on every launch. */
+        persist: Boolean = true,
     ) {
-        val config = TargetConfig(
-            host = address,
+        val saved = HostStore.SavedHost(
+            id = UUID.randomUUID().toString(),
+            address = address,
             port = port,
             user = user,
             authKind = authKind,
             keyPath = keyPath?.takeIf { it.isNotBlank() },
-            secret = secret?.takeIf { it.isNotBlank() },
             hostKeyPolicy = if (trustOnFirstUse) "accept_new" else "strict",
             refreshMs = refreshMs,
         )
 
-        viewModelScope.launch {
-            val id = withContext(Dispatchers.IO) {
-                val id = core.addTarget(config)
-                core.start(id)
-                id
-            }
-            hosts = hosts + Host(id, "$user@$address", core.snapshot(id))
-            if (selection == null) selection = id
+        if (persist) {
+            // The secret goes to the encrypted store and nowhere else; the record never carries it.
+            store.setSecret(saved.id, secret?.takeIf { it.isNotBlank() })
+            store.save(store.load() + saved)
+        } else {
+            // Not saved, so the secret has to travel in memory rather than through the Keystore.
+            ephemeralSecrets[saved.id] = secret?.takeIf { it.isNotBlank() }
         }
+
+        start(saved)
     }
 
     fun removeHost(id: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { core.removeTarget(id) }
+            // Forget the stored record and its secret too, or the host returns on the next launch
+            // and its password is left behind in the Keystore.
+            hosts.firstOrNull { it.id == id }?.savedId?.takeIf { it.isNotEmpty() }
+                ?.let { savedId ->
+                    store.forget(savedId)
+                    ephemeralSecrets.remove(savedId)
+                }
             hosts = hosts.filterNot { it.id == id }
             if (selection == id) selection = hosts.firstOrNull()?.id
         }
@@ -127,6 +191,7 @@ class CoreModel : ViewModel() {
             keyPath = key,
             secret = null,
             trustOnFirstUse = true,
+            persist = false,
         )
     }
 }

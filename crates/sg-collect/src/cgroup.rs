@@ -30,7 +30,11 @@ pub struct CgroupStats {
     pub path: String,
     /// Cumulative CPU time in microseconds. A counter.
     pub usage_usec: u64,
+    /// `memory.current` — the kernel's full charge, page cache included.
     pub memory_bytes: u64,
+    /// `inactive_file` from `memory.stat`: reclaimable page cache, charged to the cgroup but
+    /// handed straight back under pressure.
+    pub inactive_file: u64,
     /// `memory.max`, absent when the cgroup is unlimited (the file reads `max`).
     pub memory_limit: Option<u64>,
     pub pids: u64,
@@ -74,6 +78,19 @@ impl CgroupStats {
         }
     }
 
+    /// Memory the workload is actually holding.
+    ///
+    /// `memory.current` is the kernel's full charge, and it includes reclaimable page cache. A
+    /// container with a 512 MiB limit that has streamed a backup or served static files sits with
+    /// hundreds of megabytes of cache charged to it, and reporting that raw would show it pinned
+    /// near its limit — red, apparently about to be OOM-killed — while the kernel would drop that
+    /// cache without the workload noticing. `docker stats` and `podman stats` both subtract
+    /// `inactive_file` for exactly this reason, and so does the host memory collector, which uses
+    /// `MemAvailable` rather than doing cache arithmetic by hand.
+    pub fn working_set(&self) -> u64 {
+        self.memory_bytes.saturating_sub(self.inactive_file)
+    }
+
     /// Whether this cgroup is running anything.
     ///
     /// The hierarchy contains scaffolding as well as workloads — `docker/buildkit` is a real
@@ -87,7 +104,7 @@ impl CgroupStats {
     /// show, and inventing one against host RAM would be a different number wearing the same name.
     pub fn memory_fraction(&self) -> Option<f64> {
         let limit = self.memory_limit.filter(|l| *l > 0)?;
-        Some(self.memory_bytes as f64 / limit as f64 * 100.0)
+        Some(self.working_set() as f64 / limit as f64 * 100.0)
     }
 }
 
@@ -108,6 +125,8 @@ pub const CGROUP_ARGV: [&str; 3] = [
      printf '#%s\\n' \"$d\"; \
      cat \"$d/cpu.stat\" 2>/dev/null; \
      printf 'memory.current %s\\n' \"$(cat \"$d/memory.current\" 2>/dev/null)\"; \
+     printf 'inactive_file %s\\n' \
+     \"$(awk '/^inactive_file /{print $2}' \"$d/memory.stat\" 2>/dev/null)\"; \
      printf 'memory.max %s\\n' \"$(cat \"$d/memory.max\" 2>/dev/null)\"; \
      printf 'pids.current %s\\n' \"$(cat \"$d/pids.current\" 2>/dev/null)\"; \
      done; exit 0",
@@ -136,6 +155,7 @@ pub fn parse_cgroups(text: &str) -> Vec<CgroupStats> {
         match key {
             "usage_usec" => current.usage_usec = value.parse().unwrap_or(0),
             "memory.current" => current.memory_bytes = value.parse().unwrap_or(0),
+            "inactive_file" => current.inactive_file = value.parse().unwrap_or(0),
             // `max` means unlimited, and must not become a limit of zero.
             "memory.max" => current.memory_limit = value.parse().ok(),
             "pids.current" => current.pids = value.parse().unwrap_or(0),
@@ -210,7 +230,7 @@ impl Source for CgroupSource {
             if let Some(limit) = cgroup.memory_limit {
                 memory = memory.with_max(limit as f64);
             }
-            out.emit(memory, cgroup.memory_bytes);
+            out.emit(memory, cgroup.working_set());
 
             if let Some(fraction) = cgroup.memory_fraction() {
                 out.emit(
@@ -240,7 +260,7 @@ impl Source for CgroupSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{corpus, sink_for};
+    use crate::testing::{corpus, sink_for, value_of};
 
     /// A Proxmox host: a Docker container, an LXC guest and a QEMU VM, as the kernel lays them out.
     const SWEEP: &str = "\
@@ -249,16 +269,19 @@ usage_usec 12500000
 user_usec 9000000
 system_usec 3500000
 memory.current 268435456
+inactive_file 0
 memory.max 536870912
 pids.current 14
 #/sys/fs/cgroup/lxc/101
 usage_usec 88000000
 memory.current 1073741824
+inactive_file 0
 memory.max max
 pids.current 63
 #/sys/fs/cgroup/qemu.slice/102.scope
 usage_usec 450000000
 memory.current 4294967296
+inactive_file 0
 memory.max max
 pids.current 7
 ";
@@ -282,6 +305,50 @@ pids.current 7
         assert_eq!(cgroups[1].memory_fraction(), None);
         // The limited one still reports a proportion.
         assert_eq!(cgroups[0].memory_fraction(), Some(50.0));
+    }
+
+    /// Found by review, and the reason `docker stats` and `podman stats` do the same subtraction.
+    ///
+    /// A container that has streamed a backup or served static files has hundreds of megabytes of
+    /// reclaimable page cache charged to it. Reporting `memory.current` raw shows it pinned at its
+    /// limit — red, apparently about to be OOM-killed — when the kernel would drop that cache
+    /// without the workload ever noticing.
+    #[test]
+    fn page_cache_is_not_counted_as_memory_in_use() {
+        let text = "\
+#/sys/fs/cgroup/docker/aaaaaaaaaaaaaaaa
+usage_usec 100
+memory.current 528482304
+inactive_file 494927872
+memory.max 536870912
+pids.current 3
+";
+        let cgroups = parse_cgroups(text);
+        assert_eq!(cgroups[0].memory_bytes, 528_482_304, "the raw charge is kept");
+        assert_eq!(cgroups[0].working_set(), 33_554_432, "cache is not the workload");
+
+        let fraction = cgroups[0].memory_fraction().unwrap();
+        assert!(
+            (fraction - 6.25).abs() < 1e-9,
+            "container using 32 MiB of a 512 MiB limit read as {fraction}%"
+        );
+
+        let (ctx, responses) = corpus("debian").exec_literal(&CGROUP_ARGV, text).build();
+        let out = sink_for(&CgroupSource::default(), &ctx, &responses);
+        let memory = value_of(&out, "memory").unwrap();
+        assert_eq!(memory, 33_554_432.0, "the gauge shows the working set too");
+    }
+
+    /// A host without `memory.stat`, or without `awk` to read it, emits an empty value. That must
+    /// degrade to "no cache known", not to a parse that throws the whole cgroup away.
+    #[test]
+    fn a_missing_cache_figure_leaves_the_charge_untouched() {
+        let cgroups = parse_cgroups(
+            "#/sys/fs/cgroup/lxc/9\nmemory.current 4096\ninactive_file \npids.current 1\n",
+        );
+        assert_eq!(cgroups.len(), 1);
+        assert_eq!(cgroups[0].inactive_file, 0);
+        assert_eq!(cgroups[0].working_set(), 4096);
     }
 
     #[test]
