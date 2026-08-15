@@ -405,7 +405,7 @@ struct MiniStat: View {
             }
             CapacityBar(
                 fraction: gauge.fraction ?? 0,
-                color: gauge.fraction.map(Theme.severity) ?? Theme.info,
+                color: gauge.color,
                 height: 4)
         }
     }

@@ -177,6 +177,20 @@ impl ServerGlass {
             });
         }
 
+        // Refuse rather than queue. A command accepted while the host is unreachable would sit in
+        // the channel and run on reconnect — minutes later, with nobody watching, having been
+        // typed against a machine in a different state. `systemctl restart` firing five minutes
+        // after someone gave up on it is not a delay, it is a surprise.
+        if !matches!(
+            target.snapshot.read().expect("snapshot lock").state,
+            ConnectionState::Online
+        ) {
+            return Err(SgError::Connection {
+                detail: "This server is not connected, so the command was not run.".into(),
+                recoverable: true,
+            });
+        }
+
         let (reply, answer) = tokio::sync::oneshot::channel();
         target
             .commands
@@ -371,6 +385,17 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
             }
         }
 
+        // The session is gone. Anything still queued was typed against it, so it is refused here
+        // rather than carried into the next one.
+        {
+            let mut inbox = target.command_inbox.lock().await;
+            while let Ok((_, reply)) = inbox.try_recv() {
+                let _ = reply.send(Err(
+                    "The connection dropped before the command could run.".to_string()
+                ));
+            }
+        }
+
         if let TargetState::Failed {
             recoverable: false, ..
         } = runtime.state()
@@ -404,7 +429,7 @@ fn build_snapshot(
                 .filter(|e| e.kind.slug() != PROCESS_KIND)
                 .map(|e| entity_view(e, store))
                 .collect(),
-            top_processes(store, &host.id, 12),
+            top_processes(store, &host.id, 12, caps.map(|c| c.cpu_count).unwrap_or(0)),
         ),
         None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
     };

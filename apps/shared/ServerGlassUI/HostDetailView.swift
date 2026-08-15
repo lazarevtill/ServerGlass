@@ -189,7 +189,7 @@ struct HostDetailView: View {
                         spacing: 6
                     ) {
                         ForEach(cores, id: \.id) { core in
-                            CoreBar(index: core.display, percent: core.gauge("usage")?.value ?? 0)
+                            CoreBar(index: core.display, usage: core.gauge("usage"))
                         }
                     }
                 }
@@ -397,7 +397,7 @@ struct HostDetailView: View {
                                     value: model.format(temp),
                                     // Against the manufacturer's own limit where the chip
                                     // publishes one, rather than a number invented here.
-                                    emphasis: Self.heatColor(temp))
+                                    emphasis: temp.color)
                             }
                         }
                         ForEach(fans, id: \.id) { sensor in
@@ -414,18 +414,6 @@ struct HostDetailView: View {
                 }
             }
         }
-    }
-
-    /// Warm and hot, judged against the chip's critical point when it reports one.
-    ///
-    /// A fixed 80°C threshold is wrong in both directions: an NVMe drive is specified to 70 and a
-    /// CPU package to 100, so the same number is an alarm on one and unremarkable on the other.
-    static func heatColor(_ gauge: MetricGauge) -> Color {
-        guard let critical = gauge.max, critical > 0 else {
-            return gauge.value >= 90 ? Theme.bad : gauge.value >= 80 ? Theme.warn : Theme.primary
-        }
-        let fraction = gauge.value / critical
-        return fraction >= 0.95 ? Theme.bad : fraction >= 0.85 ? Theme.warn : Theme.primary
     }
 
     // MARK: Sockets
@@ -473,13 +461,6 @@ struct ProcessRow: View {
     let cores: Double
     let format: (MetricGauge) -> String
 
-    /// Share of the whole machine, which is what the bar should represent — 100 % of one core on a
-    /// 20-core box is 5 % of the host, and drawing it as a full bar would be alarming nonsense.
-    private var machineFraction: Double {
-        let total = Swift.max(cores, 1) * 100
-        return Swift.min(Swift.max(process.cpuPercent / total, 0), 1)
-    }
-
     var body: some View {
         HStack(spacing: 10) {
             Text(process.pid)
@@ -509,8 +490,8 @@ struct ProcessRow: View {
 
             HStack(spacing: 6) {
                 CapacityBar(
-                    fraction: machineFraction,
-                    color: Theme.severity(machineFraction),
+                    fraction: process.machineFraction,
+                    color: Theme.level(process.severity),
                     height: 4)
                 .frame(width: 46)
                 Text(String(format: "%.1f%%", process.cpuPercent))
@@ -532,7 +513,7 @@ struct ProcessRow: View {
     private var memoryGauge: MetricGauge {
         MetricGauge(
             seriesId: "", metric: "rss", label: "Memory", value: process.memoryBytes,
-            max: nil, unitSuffix: "B", binaryScaled: true, history: [])
+            max: nil, unitSuffix: "B", binaryScaled: true, history: [], severity: "none")
     }
 }
 

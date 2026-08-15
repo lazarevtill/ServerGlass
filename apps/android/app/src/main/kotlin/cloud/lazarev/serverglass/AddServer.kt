@@ -128,6 +128,18 @@ fun AddServerDialog(
                 color = Theme.secondary,
                 fontSize = 13.sp,
             )
+            if (!model.secretsAreHardwareBacked) {
+                // Computed since the vault landed and shown nowhere, which made a real weakening
+                // of the storage invisible: on a device whose Keystore is unavailable the password
+                // is kept like any ordinary app setting.
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "This device's secure storage is unavailable, so a password or key is saved " +
+                        "like any other app setting rather than encrypted. Consider a key file.",
+                    color = Theme.warn,
+                    fontSize = 11.5.sp,
+                )
+            }
             Spacer(Modifier.height(20.dp))
 
             Field(address, { address = it }, "Address", "hostname or IP address")

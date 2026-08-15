@@ -35,11 +35,17 @@ enum Theme {
     static let info = Color(red: 0.42, green: 0.66, blue: 0.97)
 
     /// Green below 60 %, amber to 85 %, red above — applied only where a fraction is real.
-    static func severity(_ fraction: Double) -> Color {
-        switch fraction {
-        case ..<0.60: return good
-        case ..<0.85: return warn
-        default: return bad
+    /// Colour for a level the core assigned — to a host's health, a reading, or a process.
+    ///
+    /// The thresholds behind these levels used to live here *and* in Compose, and had already
+    /// drifted apart. Deciding what counts as "busy" is the core's job; this maps its answer.
+    static func level(_ level: String) -> Color {
+        switch level {
+        case "ok": return good
+        case "busy": return warn
+        case "problem", "offline": return bad
+        case "none": return info
+        default: return secondary
         }
     }
 
@@ -61,9 +67,11 @@ extension MetricGauge {
         return Swift.min(Swift.max(value / max, 0), 1)
     }
 
-    var color: Color {
-        fraction.map(Theme.severity) ?? Theme.info
-    }
+    /// The colour for this reading, from the level the core assigned it.
+    ///
+    /// The thresholds used to live here and in Compose, and they had already drifted apart. A view
+    /// layer maps a level onto a colour; deciding what counts as "busy" is the core's job.
+    var color: Color { Theme.level(severity) }
 }
 
 extension TargetSnapshot {

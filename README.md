@@ -24,7 +24,7 @@ Every other number is one tap away.
 All of them share one Rust core: the collectors, the scheduler, the rate maths, the health
 verdicts, the wording and the number formatting are written once.
 
-**228 tests**, including live runs against Debian and Alpine SSH fixtures, and a regression test
+**234 tests**, including live runs against Debian and Alpine SSH fixtures, and a regression test
 asserting that a full refresh costs exactly one network round trip.
 
 ## Install
@@ -60,7 +60,9 @@ Four invariants, each held by a test rather than by good intentions:
    something to draw; retention and alerting belong to whatever system consumes the exported
    samples.
 3. **The core owns all logic.** The UIs render state and send commands. Parsing, scheduling, rate
-   derivation, health assessment and wording are shared Rust.
+   derivation, health assessment, wording — and how worrying a reading is — are shared Rust. A
+   view layer maps a level onto a colour and nothing more; when the thresholds lived in the UIs
+   instead, they drifted, and the same host was amber on a phone and green on a desk.
 4. **The widget must match the metric.** A ring implies a proportion; drawing one for "context
    switches per second" tells the reader nothing. See [docs/DESIGN.md](docs/DESIGN.md).
 

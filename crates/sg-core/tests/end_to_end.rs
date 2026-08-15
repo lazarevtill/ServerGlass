@@ -339,24 +339,48 @@ async fn the_live_store_stays_bounded_across_many_ticks() {
         runtime.tick().await.expect("tick");
     }
     let after_six = runtime.store().point_count();
-    let series = runtime.store().series_count();
+    let steady_six = steady_series(&runtime);
 
     for _ in 0..6 {
         runtime.tick().await.expect("tick");
     }
     let after_twelve = runtime.store().point_count();
+    let series_now = runtime.store().series_count();
 
+    // Processes come and go, so the *total* legitimately moves — this used to assert it did not,
+    // and passed only on an idle fixture: the moment anything else connected to the host, a few
+    // sshd processes entered and left and the test failed for a reason that was never a defect.
+    //
+    // Everything that is not a process is a fixed set — cores, interfaces, disks, mounts — so
+    // that half is asserted exactly, which is what actually catches a leak. Overall growth is
+    // bounded by the window assertion below.
     assert_eq!(
-        runtime.store().series_count(),
-        series,
-        "series set should have stabilised"
+        steady_series(&runtime),
+        steady_six,
+        "the series set that cannot churn, churned"
     );
     assert!(
-        after_twelve <= series * sg_core::DEFAULT_WINDOW,
-        "store exceeded its window: {after_twelve} points over {series} series"
+        after_twelve <= series_now * sg_core::DEFAULT_WINDOW,
+        "store exceeded its window: {after_twelve} points over {series_now} series"
     );
     assert!(
         after_twelve > after_six,
         "history should still be accumulating within the window"
     );
+}
+
+/// Series belonging to anything but a process.
+///
+/// The process ranking is the only part of the entity tree that legitimately changes between
+/// ticks; every other series is there for the life of the connection.
+fn steady_series(runtime: &TargetRuntime) -> usize {
+    let store = runtime.store();
+    store
+        .descriptors()
+        .filter(|d| {
+            store
+                .entity(&d.entity)
+                .is_none_or(|e| e.kind != sg_model::EntityKind::Process)
+        })
+        .count()
 }

@@ -126,6 +126,29 @@ fun TechnicalHostScreen(
             }
         }
 
+        (snapshot.state as? uniffi.sg_ffi.ConnectionState.Failed)?.let { failed ->
+            item {
+                Banner(
+                    text = failed.message,
+                    detail = if (failed.recoverable) {
+                        "ServerGlass will keep retrying."
+                    } else {
+                        "This will not resolve on its own."
+                    },
+                    color = Theme.bad,
+                )
+            }
+        }
+        if (snapshot.sourceErrors.isNotEmpty()) {
+            item {
+                Banner(
+                    text = "${snapshot.sourceErrors.size} collector(s) reported a problem",
+                    detail = snapshot.sourceErrors.joinToString("\n"),
+                    color = Theme.warn,
+                )
+            }
+        }
+
         if (snapshot.gauges.isEmpty()) {
             item {
                 Text(
@@ -308,7 +331,7 @@ private fun CpuPanel(
                 verticalSpacing = 6.dp,
                 count = cores.size,
             ) { index ->
-                CoreBar(cores[index].display, cores[index].value("usage"))
+                CoreBar(cores[index].display, cores[index].gauge("usage"))
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -465,40 +488,17 @@ private fun SensorPanel(snapshot: TargetSnapshot, format: (MetricGauge) -> Strin
             KeyValueRow(
                 sensor.display,
                 format(gauge),
-                emphasis = if (metric == "temp") heatColour(gauge) else Theme.primary,
+                // The core says how worrying a reading is; a temperature is judged against the
+                // chip's own critical point there rather than by a number written here twice.
+                emphasis = if (metric == "temp") gauge.color() else Theme.primary,
             )
         }
-    }
-}
-
-/**
- * Warm and hot, judged against the chip's own critical point when it publishes one.
- *
- * A fixed 80°C threshold is wrong in both directions: an NVMe drive is specified to 70 and a CPU
- * package to 100, so the same number is an alarm on one and unremarkable on the other.
- */
-private fun heatColour(gauge: MetricGauge): Color {
-    val critical = gauge.max
-    if (critical == null || critical <= 0.0) {
-        return when {
-            gauge.value >= 90 -> Theme.bad
-            gauge.value >= 80 -> Theme.warn
-            else -> Theme.primary
-        }
-    }
-    val fraction = gauge.value / critical
-    return when {
-        fraction >= 0.95 -> Theme.bad
-        fraction >= 0.85 -> Theme.warn
-        else -> Theme.primary
     }
 }
 
 @Composable
 private fun ProcessPanel(snapshot: TargetSnapshot, model: CoreModel) {
     if (snapshot.topProcesses.isEmpty()) return
-    val cores = snapshot.cpuCount.toDouble().coerceAtLeast(1.0)
-
     Panel("Processes", subtitle = "top ${snapshot.topProcesses.size}") {
         Column {
             Row(
@@ -519,11 +519,6 @@ private fun ProcessPanel(snapshot: TargetSnapshot, model: CoreModel) {
             }
 
             snapshot.topProcesses.forEach { process ->
-                // Share of the whole machine, which is what the bar should represent — 100% of one
-                // core on a 20-core box is 5% of the host, and drawing it full would be alarming
-                // nonsense.
-                val machineFraction = (process.cpuPercent / (cores * 100)).coerceIn(0.0, 1.0)
-
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 2.5.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -573,9 +568,12 @@ private fun ProcessPanel(snapshot: TargetSnapshot, model: CoreModel) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.width(46.dp)) {
+                            // Share of the whole machine and how worrying it is both come from
+                            // the core: 100% of one core on a 20-core box is 5% of the host, and
+                            // two UIs doing that arithmetic is two chances to get it wrong.
                             CapacityBar(
-                                machineFraction,
-                                Theme.severity(machineFraction),
+                                process.machineFraction,
+                                Theme.health(process.severity),
                                 height = 4.dp,
                             )
                         }
@@ -636,6 +634,28 @@ private fun GroupPanel(
                 emphasis = if (gauge.metric == "tcp_retrans" && gauge.value > 0) Theme.warn else Theme.primary,
             )
         }
+    }
+}
+
+/**
+ * A failure worth interrupting the readings for.
+ *
+ * The Apple apps have shown these since the beginning; Android showed nothing at all, so a host
+ * whose collectors were failing looked identical to one that was simply quiet.
+ */
+@Composable
+private fun Banner(text: String, detail: String, color: Color) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(text, color = Theme.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(detail, color = Theme.secondary, fontSize = 11.sp)
     }
 }
 
@@ -866,7 +886,8 @@ private fun KeyValueRow(label: String, value: String, emphasis: Color = Theme.pr
 
 /** Mirrors `CoreBar`. */
 @Composable
-private fun CoreBar(index: String, percent: Double) {
+private fun CoreBar(index: String, usage: MetricGauge?) {
+    val percent = usage?.value ?: 0.0
     Row(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -880,7 +901,7 @@ private fun CoreBar(index: String, percent: Double) {
             modifier = Modifier.width(16.dp),
         )
         Box(Modifier.weight(1f)) {
-            CapacityBar(percent / 100, Theme.severity(percent / 100), height = 5.dp)
+            CapacityBar(percent / 100, usage?.color() ?: Theme.good, height = 5.dp)
         }
         Text(
             "${Math.round(percent)}",
@@ -1050,12 +1071,13 @@ fun EntityView.value(metric: String): Double = gauge(metric)?.value ?: 0.0
 fun MetricGauge.fraction(): Double? = max?.takeIf { it > 0 }?.let { (value / it).coerceIn(0.0, 1.0) }
 
 /**
- * Colour by how close to full — the same thresholds as `Theme.severity` on the Apple side.
+ * The colour for this reading, from the level the core assigned it.
  *
- * A reading with no maximum is not a proportion of anything, so it gets the neutral colour rather
- * than a green that would imply "plenty of room left".
+ * The thresholds used to live here and in SwiftUI, and they had already drifted apart — 0.75/0.90
+ * against 0.60/0.85 — so the same host was amber on a phone and green on a desk. A view layer maps
+ * a level onto a colour; deciding what counts as "busy" is the core's job.
  */
-fun MetricGauge.color(): Color = fraction()?.let { Theme.severity(it) } ?: Theme.info
+fun MetricGauge.color(): Color = Theme.health(severity)
 
 /** "6 of 14" when a list is capped, and nothing when everything is on screen. */
 private fun shown(count: Int, cap: Int): String =

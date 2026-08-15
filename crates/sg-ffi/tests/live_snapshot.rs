@@ -431,3 +431,33 @@ fn commands_run_on_the_live_session() {
         "commands should run on the counted session: {before} -> {after}"
     );
 }
+
+/// A command must not be accepted for a host that is not answering.
+///
+/// It used to be queued: the channel took it, the poll loop was busy reconnecting, and it ran
+/// whenever the session came back — minutes later, unwatched, against a machine in a different
+/// state than the one it was typed for.
+#[test]
+fn commands_are_refused_rather_than_queued_while_offline() {
+    let core = ServerGlass::new();
+    // Never started, so never online.
+    let id = core.add_target(fixture_config(DEBIAN_PORT, 1000));
+
+    let refused = core.run_command(id.clone(), "echo late".into());
+    assert!(refused.is_err(), "an offline host accepted a command");
+
+    // And nothing is left behind waiting to fire: starting it later must not run that command.
+    if fixture_up(DEBIAN_PORT) {
+        core.start(id.clone()).expect("start");
+        for _ in 0..40 {
+            std::thread::sleep(Duration::from_millis(250));
+            if core.snapshot(id.clone()).expect("snapshot").state == ConnectionState::Online {
+                break;
+            }
+        }
+        let now = core
+            .run_command(id.clone(), "echo now".into())
+            .expect("run once online");
+        assert_eq!(now.output.trim(), "now", "a stale command ran instead");
+    }
+}

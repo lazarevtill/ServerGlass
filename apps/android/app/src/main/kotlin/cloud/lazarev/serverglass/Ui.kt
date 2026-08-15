@@ -88,17 +88,17 @@ object Theme {
     val bad = Color(0xFFF77070)
     val info = Color(0xFF6BA8F7)
 
-    /** The same 0.60 / 0.85 boundaries the Apple apps use. */
-    fun severity(fraction: Double): Color = when {
-        fraction < 0.60 -> good
-        fraction < 0.85 -> warn
-        else -> bad
-    }
-
+    /**
+     * Colour for a level the core assigned — to a host's health or to a single reading.
+     *
+     * `none` is a reading with no maximum: not a proportion of anything, so it gets the neutral
+     * colour rather than a green implying "plenty left".
+     */
     fun health(level: String): Color = when (level) {
         "ok" -> good
         "busy" -> warn
         "problem", "offline" -> bad
+        "none" -> info
         else -> secondary
     }
 }

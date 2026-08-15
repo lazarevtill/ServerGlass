@@ -83,6 +83,13 @@ pub struct MetricGauge {
     pub binary_scaled: bool,
     /// Recent values, oldest first, for the sparkline.
     pub history: Vec<f64>,
+    /// `ok`, `busy`, `problem`, or `none` when the reading is not a proportion of anything.
+    ///
+    /// Decided here rather than in each UI. It had drifted out into all four front-ends — Android
+    /// coloured at 0.75/0.90 where Apple used 0.60/0.85, so the same host was amber on a phone and
+    /// green on a desk — and the temperature rule was written twice, by hand, in two languages.
+    /// The UIs map a level onto a colour, which is the whole of what a view layer should decide.
+    pub severity: String,
 }
 
 /// A titled group of secondary metrics, shown below the headline grid.
@@ -133,6 +140,14 @@ pub struct ProcessView {
     pub memory_bytes: f64,
     /// `R`, `S`, `D`, `Z`, …
     pub state: String,
+    /// Share of the *whole machine*, 0-1 — which is what a bar beside this row should draw.
+    ///
+    /// 100% of one core on a twenty-core host is 5% of the machine, and drawing it as a full bar
+    /// would be alarming nonsense. Computed here because the core knows the core count and because
+    /// both UIs were doing the arithmetic and the colouring themselves.
+    pub machine_fraction: f64,
+    /// `ok`, `busy` or `problem` for that share.
+    pub severity: String,
 }
 
 /// A node in the entity tree.
@@ -320,7 +335,42 @@ fn gauge_from(descriptor: &SeriesDescriptor, store: &LiveStore) -> Option<Metric
             .into_iter()
             .map(|p| p.value)
             .collect(),
+        severity: severity_of(unit, latest.value, descriptor.display_max()),
     })
+}
+
+/// How worrying a reading is.
+///
+/// Temperature is judged differently from everything else, and has to be: an NVMe drive is
+/// specified to 70°C and a CPU package to 100, so a fixed number is wrong in both directions.
+/// Where the chip publishes its own critical point the reading is judged against that; where it
+/// does not, the fallback is the same pair of numbers the plain-language verdict uses.
+///
+/// Anything without a maximum is not a proportion of anything, so it gets no level at all rather
+/// than a green that would imply "plenty left".
+fn severity_of(unit: Unit, value: f64, max: Option<f64>) -> String {
+    let level = |fraction: f64, warn: f64, bad: f64| {
+        if fraction >= bad {
+            "problem"
+        } else if fraction >= warn {
+            "busy"
+        } else {
+            "ok"
+        }
+    };
+
+    if unit == Unit::Celsius {
+        return match max.filter(|m| *m > 0.0) {
+            Some(critical) => level(value / critical, 0.85, 0.95),
+            None => level(value, 80.0, 90.0),
+        }
+        .to_string();
+    }
+
+    match max.filter(|m| *m > 0.0) {
+        Some(max) => level((value / max).clamp(0.0, 1.0), 0.60, 0.85).to_string(),
+        None => "none".to_string(),
+    }
 }
 
 /// The headline status grid: only the metrics in [`HEADLINE`], in that order.
@@ -394,7 +444,13 @@ pub const PROCESS_KIND: &str = "proc";
 /// CPU is a derived rate, so it is absent on the first tick after connecting and every process
 /// ties at zero; falling back to resident memory means the panel shows something plausible
 /// immediately rather than an arbitrary ordering that then reshuffles.
-pub fn top_processes(store: &LiveStore, host: &EntityId, limit: usize) -> Vec<ProcessView> {
+pub fn top_processes(
+    store: &LiveStore,
+    host: &EntityId,
+    limit: usize,
+    cpu_count: u32,
+) -> Vec<ProcessView> {
+    let machine = f64::from(cpu_count.max(1)) * 100.0;
     let mut rows: Vec<ProcessView> = store
         .children_of(host)
         .into_iter()
@@ -419,6 +475,8 @@ pub fn top_processes(store: &LiveStore, host: &EntityId, limit: usize) -> Vec<Pr
                 cpu_percent: value("cpu"),
                 memory_bytes: value("rss"),
                 state: entity.labels.get("state").cloned().unwrap_or_default(),
+                machine_fraction: (value("cpu") / machine).clamp(0.0, 1.0),
+                severity: severity_of(Unit::Percent, value("cpu") / machine * 100.0, Some(100.0)),
             }
         })
         .collect();
@@ -957,5 +1015,71 @@ mod tests {
                 ..
             }
         ));
+    }
+}
+
+#[cfg(test)]
+mod severity_tests {
+    use super::*;
+
+    /// The rule the UIs used to each implement for themselves.
+    #[test]
+    fn utilisation_is_judged_against_its_own_maximum() {
+        assert_eq!(severity_of(Unit::Percent, 42.0, Some(100.0)), "ok");
+        assert_eq!(severity_of(Unit::Percent, 71.0, Some(100.0)), "busy");
+        assert_eq!(severity_of(Unit::Percent, 91.0, Some(100.0)), "problem");
+    }
+
+    /// A rate has no maximum, so it is not a proportion of anything — and colouring it green
+    /// would say "plenty of room left" about a number with no ceiling.
+    #[test]
+    fn a_reading_without_a_maximum_has_no_level() {
+        assert_eq!(severity_of(Unit::BytesPerSecond, 9_000_000.0, None), "none");
+    }
+
+    /// An NVMe drive is specified to 70°C and a CPU package to 100. Judging both by one number is
+    /// wrong in both directions, so the chip's own critical point wins where it publishes one.
+    #[test]
+    fn temperature_is_judged_against_the_chips_own_limit() {
+        // 68 °C on a drive whose limit is 70 is nearly at it.
+        assert_eq!(severity_of(Unit::Celsius, 68.0, Some(70.0)), "problem");
+        // The same 68 °C on a package specified to 100 is unremarkable.
+        assert_eq!(severity_of(Unit::Celsius, 68.0, Some(100.0)), "ok");
+    }
+
+    /// Most thermal zones publish no critical point, so there has to be a fallback — and it has to
+    /// be the same pair of numbers the spoken verdict uses, or the colour and the sentence
+    /// disagree on the same screen.
+    #[test]
+    fn temperature_without_a_limit_falls_back_to_the_spoken_thresholds() {
+        assert_eq!(severity_of(Unit::Celsius, 72.0, None), "ok");
+        assert_eq!(severity_of(Unit::Celsius, 84.0, None), "busy");
+        assert_eq!(severity_of(Unit::Celsius, 95.0, None), "problem");
+    }
+}
+
+#[cfg(test)]
+mod process_share_tests {
+    use super::*;
+
+    /// A process pinning one core is busy on a laptop and barely noticeable on a Proxmox host.
+    /// Both UIs were doing this arithmetic themselves, which is how the two came to disagree.
+    #[test]
+    fn a_processes_share_is_of_the_machine_not_of_one_core() {
+        let one_core_fully_busy = 100.0;
+
+        let on_a_single_core_box = (one_core_fully_busy / (1.0 * 100.0_f64)).clamp(0.0, 1.0);
+        assert_eq!(on_a_single_core_box, 1.0);
+        assert_eq!(
+            severity_of(Unit::Percent, on_a_single_core_box * 100.0, Some(100.0)),
+            "problem"
+        );
+
+        let on_a_twenty_core_box = (one_core_fully_busy / (20.0 * 100.0_f64)).clamp(0.0, 1.0);
+        assert_eq!(on_a_twenty_core_box, 0.05);
+        assert_eq!(
+            severity_of(Unit::Percent, on_a_twenty_core_box * 100.0, Some(100.0)),
+            "ok"
+        );
     }
 }

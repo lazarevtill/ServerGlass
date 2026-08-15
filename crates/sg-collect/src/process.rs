@@ -20,7 +20,7 @@ use sg_model::{
 /// the whole set is rebuilt every tick, so this is the difference between a bounded few megabytes
 /// and unbounded growth. Selection is by resident memory, which — unlike CPU — is readable from a
 /// single sample, so the cut can be made on the very first tick.
-const MAX_PROCESSES: usize = 256;
+pub const MAX_PROCESSES: usize = 256;
 
 /// One row of the process table.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -246,7 +246,9 @@ struct KeyValueRow: View {
 /// twenty rings is what a 20-core Proxmox host produced before this existed.
 struct CoreBar: View {
     let index: String
-    let percent: Double
+    let usage: MetricGauge?
+
+    private var percent: Double { usage?.value ?? 0 }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -254,7 +256,7 @@ struct CoreBar: View {
                 .font(Theme.value(8.5, weight: .regular))
                 .foregroundStyle(Theme.tertiary)
                 .frame(width: 16, alignment: .trailing)
-            CapacityBar(fraction: percent / 100, color: Theme.severity(percent / 100), height: 5)
+            CapacityBar(fraction: percent / 100, color: usage?.color ?? Theme.good, height: 5)
             Text("\(Int(percent.rounded()))")
                 .font(Theme.value(8.5, weight: .regular))
                 .foregroundStyle(Theme.secondary)

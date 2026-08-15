@@ -327,6 +327,7 @@ mod tests {
             unit_suffix: Unit::Percent.suffix().into(),
             binary_scaled: false,
             history: vec![],
+            severity: "none".into(),
         }
     }
 

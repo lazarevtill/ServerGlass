@@ -1214,6 +1214,15 @@ public struct MetricGauge: Equatable, Hashable {
      * Recent values, oldest first, for the sparkline.
      */
     public var history: [Double]
+    /**
+     * `ok`, `busy`, `problem`, or `none` when the reading is not a proportion of anything.
+     *
+     * Decided here rather than in each UI. It had drifted out into all four front-ends — Android
+     * coloured at 0.75/0.90 where Apple used 0.60/0.85, so the same host was amber on a phone and
+     * green on a desk — and the temperature rule was written twice, by hand, in two languages.
+     * The UIs map a level onto a colour, which is the whole of what a view layer should decide.
+     */
+    public var severity: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1230,7 +1239,15 @@ public struct MetricGauge: Equatable, Hashable {
          */binaryScaled: Bool, 
         /**
          * Recent values, oldest first, for the sparkline.
-         */history: [Double]) {
+         */history: [Double], 
+        /**
+         * `ok`, `busy`, `problem`, or `none` when the reading is not a proportion of anything.
+         *
+         * Decided here rather than in each UI. It had drifted out into all four front-ends — Android
+         * coloured at 0.75/0.90 where Apple used 0.60/0.85, so the same host was amber on a phone and
+         * green on a desk — and the temperature rule was written twice, by hand, in two languages.
+         * The UIs map a level onto a colour, which is the whole of what a view layer should decide.
+         */severity: String) {
         self.seriesId = seriesId
         self.metric = metric
         self.label = label
@@ -1239,6 +1256,7 @@ public struct MetricGauge: Equatable, Hashable {
         self.unitSuffix = unitSuffix
         self.binaryScaled = binaryScaled
         self.history = history
+        self.severity = severity
     }
 
     
@@ -1264,7 +1282,8 @@ public struct FfiConverterTypeMetricGauge: FfiConverterRustBuffer {
                 max: FfiConverterOptionDouble.read(from: &buf), 
                 unitSuffix: FfiConverterString.read(from: &buf), 
                 binaryScaled: FfiConverterBool.read(from: &buf), 
-                history: FfiConverterSequenceDouble.read(from: &buf)
+                history: FfiConverterSequenceDouble.read(from: &buf), 
+                severity: FfiConverterString.read(from: &buf)
         )
     }
 
@@ -1277,6 +1296,7 @@ public struct FfiConverterTypeMetricGauge: FfiConverterRustBuffer {
         FfiConverterString.write(value.unitSuffix, into: &buf)
         FfiConverterBool.write(value.binaryScaled, into: &buf)
         FfiConverterSequenceDouble.write(value.history, into: &buf)
+        FfiConverterString.write(value.severity, into: &buf)
     }
 }
 
@@ -1316,6 +1336,18 @@ public struct ProcessView: Equatable, Hashable {
      * `R`, `S`, `D`, `Z`, …
      */
     public var state: String
+    /**
+     * Share of the *whole machine*, 0-1 — which is what a bar beside this row should draw.
+     *
+     * 100% of one core on a twenty-core host is 5% of the machine, and drawing it as a full bar
+     * would be alarming nonsense. Computed here because the core knows the core count and because
+     * both UIs were doing the arithmetic and the colouring themselves.
+     */
+    public var machineFraction: Double
+    /**
+     * `ok`, `busy` or `problem` for that share.
+     */
+    public var severity: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1326,12 +1358,24 @@ public struct ProcessView: Equatable, Hashable {
          */cpuPercent: Double, memoryBytes: Double, 
         /**
          * `R`, `S`, `D`, `Z`, …
-         */state: String) {
+         */state: String, 
+        /**
+         * Share of the *whole machine*, 0-1 — which is what a bar beside this row should draw.
+         *
+         * 100% of one core on a twenty-core host is 5% of the machine, and drawing it as a full bar
+         * would be alarming nonsense. Computed here because the core knows the core count and because
+         * both UIs were doing the arithmetic and the colouring themselves.
+         */machineFraction: Double, 
+        /**
+         * `ok`, `busy` or `problem` for that share.
+         */severity: String) {
         self.pid = pid
         self.command = command
         self.cpuPercent = cpuPercent
         self.memoryBytes = memoryBytes
         self.state = state
+        self.machineFraction = machineFraction
+        self.severity = severity
     }
 
     
@@ -1354,7 +1398,9 @@ public struct FfiConverterTypeProcessView: FfiConverterRustBuffer {
                 command: FfiConverterString.read(from: &buf), 
                 cpuPercent: FfiConverterDouble.read(from: &buf), 
                 memoryBytes: FfiConverterDouble.read(from: &buf), 
-                state: FfiConverterString.read(from: &buf)
+                state: FfiConverterString.read(from: &buf), 
+                machineFraction: FfiConverterDouble.read(from: &buf), 
+                severity: FfiConverterString.read(from: &buf)
         )
     }
 
@@ -1364,6 +1410,8 @@ public struct FfiConverterTypeProcessView: FfiConverterRustBuffer {
         FfiConverterDouble.write(value.cpuPercent, into: &buf)
         FfiConverterDouble.write(value.memoryBytes, into: &buf)
         FfiConverterString.write(value.state, into: &buf)
+        FfiConverterDouble.write(value.machineFraction, into: &buf)
+        FfiConverterString.write(value.severity, into: &buf)
     }
 }
 
