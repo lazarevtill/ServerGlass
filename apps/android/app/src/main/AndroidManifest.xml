@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The only permission the app needs: it talks to servers over SSH and does nothing else. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="false"
+        android:label="ServerGlass"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ServerGlass">
+
+        <!--
+            `configChanges` is what makes unfolding seamless. Without it the activity is destroyed
+            and recreated as the hinge opens: the SSH connection is torn down and rebuilt, every
+            chart restarts from empty, and the reading you were looking at disappears for a second.
+            Handling the change means the layout simply reflows.
+
+            `resizeableActivity` opts into split-screen and free-form windowing, which the same
+            width-driven layout already handles.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="ServerGlass"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|density"
+            android:resizeableActivity="true"
+            android:theme="@style/Theme.ServerGlass">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

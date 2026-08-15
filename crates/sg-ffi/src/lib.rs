@@ -39,11 +39,15 @@ uniffi::setup_scaffolding!();
 pub enum SgError {
     #[error("no such target: {id}")]
     UnknownTarget { id: String },
-    #[error("{message}")]
-    Connection { message: String, recoverable: bool },
-    #[error("internal error: {message}")]
-    Internal { message: String },
+    #[error("{detail}")]
+    Connection { detail: String, recoverable: bool },
+    #[error("internal error: {detail}")]
+    Internal { detail: String },
 }
+
+// The field is `detail`, not `message`, on purpose: UniFFI maps an error enum onto a Kotlin
+// `Exception` subclass, which already has a `message` property, and the duplicate makes every
+// reference to it an "overload resolution ambiguity" that fails the Android build.
 
 /// One monitored host and its background poller.
 struct Target {
