@@ -5,7 +5,7 @@
 //! — the core owns all logic — from eroding one convenience method at a time in four codebases.
 
 use sg_core::{LiveStore, TargetState};
-use sg_model::{Entity, EntityId, SeriesDescriptor, SeriesKind, Unit};
+use sg_model::{Entity, EntityId, EntityKind, SeriesDescriptor, SeriesKind, Unit};
 
 /// How to reach a host.
 #[derive(Clone, Debug, uniffi::Record)]
@@ -86,6 +86,23 @@ pub struct DetailGroup {
     pub gauges: Vec<MetricGauge>,
 }
 
+/// One row of the process table.
+///
+/// Flattened rather than reusing [`EntityView`]: a host runs hundreds of processes, and shipping
+/// each one's full gauge set and sparkline history across the FFI twice a second would dominate
+/// the cost of a refresh. Only the handful worth showing crosses, already sorted.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ProcessView {
+    pub pid: String,
+    pub command: String,
+    /// Percent of one core, so a process spanning four cores reads 400 — the same convention
+    /// `top` uses.
+    pub cpu_percent: f64,
+    pub memory_bytes: f64,
+    /// `R`, `S`, `D`, `Z`, …
+    pub state: String,
+}
+
 /// A node in the entity tree.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct EntityView {
@@ -111,8 +128,11 @@ pub struct TargetSnapshot {
     pub gauges: Vec<MetricGauge>,
     /// Everything else the host reports, grouped by collector.
     pub detail_groups: Vec<DetailGroup>,
-    /// Child entities — cores, interfaces, disks, filesystems.
+    /// Child entities — cores, interfaces, disks, filesystems. Processes are deliberately absent;
+    /// see `top_processes`.
     pub entities: Vec<EntityView>,
+    /// The busiest processes, already ranked. What explains a busy host.
+    pub top_processes: Vec<ProcessView>,
     /// Collectors that failed to parse this tick. Non-fatal.
     pub source_errors: Vec<String>,
     pub last_update_ms: i64,
@@ -135,6 +155,7 @@ impl TargetSnapshot {
             gauges: Vec::new(),
             detail_groups: Vec::new(),
             entities: Vec::new(),
+            top_processes: Vec::new(),
             source_errors: Vec::new(),
             last_update_ms: 0,
             round_trips: 0,
@@ -318,6 +339,57 @@ pub fn host_details(store: &LiveStore, host: &EntityId) -> Vec<DetailGroup> {
             .unwrap_or(usize::MAX)
     });
     groups
+}
+
+/// Entity kind slug for a process, used to keep the table out of the general entity list.
+pub const PROCESS_KIND: &str = "proc";
+
+/// The busiest processes, ranked by CPU and then by memory.
+///
+/// CPU is a derived rate, so it is absent on the first tick after connecting and every process
+/// ties at zero; falling back to resident memory means the panel shows something plausible
+/// immediately rather than an arbitrary ordering that then reshuffles.
+pub fn top_processes(store: &LiveStore, host: &EntityId, limit: usize) -> Vec<ProcessView> {
+    let mut rows: Vec<ProcessView> = store
+        .children_of(host)
+        .into_iter()
+        .filter(|e| e.kind == EntityKind::Process)
+        .map(|entity| {
+            let value = |metric: &str| {
+                store
+                    .series_for(&entity.id)
+                    .into_iter()
+                    .find(|d| d.metric == metric)
+                    .and_then(|d| store.latest(&d.id))
+                    .map(|p| p.value)
+                    .unwrap_or(0.0)
+            };
+            ProcessView {
+                pid: entity.display.clone(),
+                command: entity
+                    .labels
+                    .get("command")
+                    .cloned()
+                    .unwrap_or_else(|| entity.display.clone()),
+                cpu_percent: value("cpu"),
+                memory_bytes: value("rss"),
+                state: entity.labels.get("state").cloned().unwrap_or_default(),
+            }
+        })
+        .collect();
+
+    rows.sort_by(|a, b| {
+        b.cpu_percent
+            .partial_cmp(&a.cpu_percent)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(
+                b.memory_bytes
+                    .partial_cmp(&a.memory_bytes)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+    });
+    rows.truncate(limit);
+    rows
 }
 
 pub fn entity_view(entity: &Entity, store: &LiveStore) -> EntityView {

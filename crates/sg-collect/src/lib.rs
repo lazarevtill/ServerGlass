@@ -21,6 +21,7 @@ pub mod filesystem;
 pub mod load;
 pub mod memory;
 pub mod network;
+pub mod process;
 pub mod tcp;
 
 #[cfg(test)]
@@ -34,6 +35,7 @@ pub use filesystem::FilesystemSource;
 pub use load::LoadSource;
 pub use memory::MemorySource;
 pub use network::NetworkSource;
+pub use process::ProcessSource;
 pub use tcp::TcpSource;
 
 /// Every built-in collector, in the order the status page shows them.
@@ -46,6 +48,7 @@ pub fn builtin_sources() -> Vec<Box<dyn Source>> {
         Box::new(DiskIoSource::default()),
         Box::new(NetworkSource::default()),
         Box::new(TcpSource::default()),
+        Box::new(ProcessSource::default()),
     ]
 }
 

@@ -218,6 +218,80 @@ fn round_trips_grow_by_one_per_refresh() {
     core.remove_target(id).expect("remove");
 }
 
+/// The panel that explains a busy host. Per-process CPU is a derived rate, so it only exists from
+/// the second tick — and it must be attributed to the right process, which is the whole risk in
+/// parsing `/proc/<pid>/stat`.
+#[test]
+fn the_process_table_explains_what_is_running() {
+    if !fixture_up(DEBIAN_PORT) {
+        return;
+    }
+
+    let core = ServerGlass::new();
+    let id = core.add_target(fixture_config(DEBIAN_PORT, 500));
+    core.start(id.clone()).expect("start");
+
+    let snapshot = poll_until(&core, &id, Duration::from_secs(25), |s| {
+        !s.top_processes.is_empty()
+    });
+
+    assert!(
+        !snapshot.top_processes.is_empty(),
+        "no processes were reported"
+    );
+
+    // sshd is serving this very connection, so it is guaranteed to be running.
+    assert!(
+        snapshot
+            .top_processes
+            .iter()
+            .any(|p| p.command.contains("sshd")),
+        "expected sshd among {:?}",
+        snapshot
+            .top_processes
+            .iter()
+            .map(|p| &p.command)
+            .collect::<Vec<_>>()
+    );
+
+    for process in &snapshot.top_processes {
+        assert!(
+            process.pid.parse::<u32>().is_ok(),
+            "pid {:?} is not numeric",
+            process.pid
+        );
+        assert!(
+            !process.command.is_empty(),
+            "process {} has no command",
+            process.pid
+        );
+        assert!(process.cpu_percent.is_finite() && process.cpu_percent >= 0.0);
+        assert!(
+            process.memory_bytes > 0.0,
+            "kernel threads should be filtered out"
+        );
+    }
+
+    // Ranked by CPU, descending — the panel's entire purpose.
+    let cpu: Vec<f64> = snapshot
+        .top_processes
+        .iter()
+        .map(|p| p.cpu_percent)
+        .collect();
+    assert!(
+        cpu.windows(2).all(|w| w[0] >= w[1]),
+        "process table is not ranked: {cpu:?}"
+    );
+
+    // Hundreds of process entities must not be shipped in the general entity list.
+    assert!(
+        !snapshot.entities.iter().any(|e| e.kind == "proc"),
+        "process entities leaked into the snapshot's entity list"
+    );
+
+    core.remove_target(id).expect("remove");
+}
+
 /// Bad credentials must stop, not retry forever.
 #[test]
 fn unrecoverable_failures_are_reported_and_not_retried() {

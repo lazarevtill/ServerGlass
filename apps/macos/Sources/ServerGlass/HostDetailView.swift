@@ -46,6 +46,7 @@ struct HostDetailView: View {
                         networkPanel
                         diskPanel
                     }
+                    processPanel
                     filesystemPanel
                     socketsPanel
                 }
@@ -274,6 +275,31 @@ struct HostDetailView: View {
         }
     }
 
+    // MARK: Processes
+
+    /// What is actually using the machine.
+    ///
+    /// "CPU 79 %" only raises a question; this is where it gets answered. Placed directly under the
+    /// CPU and memory panels for that reason, and rendered as a table because a process list is
+    /// something you read down, not something you gauge.
+    private var processPanel: some View {
+        Group {
+            if !snapshot.topProcesses.isEmpty {
+                Panel(title: "Top processes", subtitle: "by CPU") {
+                    VStack(spacing: 0) {
+                        ProcessHeaderRow()
+                        ForEach(snapshot.topProcesses, id: \.pid) { process in
+                            ProcessRow(
+                                process: process,
+                                cores: Double(snapshot.cpuCount),
+                                format: model.format)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Filesystems
 
     private var filesystemPanel: some View {
@@ -324,6 +350,90 @@ struct HostDetailView: View {
                 }
             }
         }
+    }
+}
+
+struct ProcessHeaderRow: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("PID").frame(width: 52, alignment: .trailing)
+            Text("COMMAND").frame(maxWidth: .infinity, alignment: .leading)
+            Text("CPU").frame(width: 100, alignment: .trailing)
+            Text("MEMORY").frame(width: 72, alignment: .trailing)
+        }
+        .font(Theme.label(8.5))
+        .tracking(0.5)
+        .foregroundStyle(Theme.tertiary)
+        .padding(.bottom, 5)
+    }
+}
+
+struct ProcessRow: View {
+    let process: ProcessView
+    /// Used to scale the inline bar: on a 20-core host a process at 400 % is busy, not impossible.
+    let cores: Double
+    let format: (MetricGauge) -> String
+
+    /// Share of the whole machine, which is what the bar should represent — 100 % of one core on a
+    /// 20-core box is 5 % of the host, and drawing it as a full bar would be alarming nonsense.
+    private var machineFraction: Double {
+        let total = Swift.max(cores, 1) * 100
+        return Swift.min(Swift.max(process.cpuPercent / total, 0), 1)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(process.pid)
+                .font(Theme.value(10, weight: .regular))
+                .foregroundStyle(Theme.tertiary)
+                .frame(width: 52, alignment: .trailing)
+
+            HStack(spacing: 5) {
+                Text(process.command)
+                    .font(Theme.value(10.5, weight: .medium))
+                    .foregroundStyle(Theme.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                // Uninterruptible sleep and zombies are worth flagging; sleeping and running are
+                // the normal states and adding a badge for them would be pure noise.
+                if process.state == "D" || process.state == "Z" {
+                    Text(process.state)
+                        .font(Theme.label(8))
+                        .foregroundStyle(Theme.warn)
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .background(Theme.warn.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 6) {
+                CapacityBar(
+                    fraction: machineFraction,
+                    color: Theme.severity(machineFraction),
+                    height: 4)
+                .frame(width: 46)
+                Text(String(format: "%.1f%%", process.cpuPercent))
+                    .font(Theme.value(10, weight: .medium))
+                    .foregroundStyle(Theme.primary)
+                    .frame(width: 48, alignment: .trailing)
+            }
+            .frame(width: 100, alignment: .trailing)
+
+            Text(format(memoryGauge))
+                .font(Theme.value(10, weight: .regular))
+                .foregroundStyle(Theme.secondary)
+                .frame(width: 72, alignment: .trailing)
+        }
+        .padding(.vertical, 2.5)
+    }
+
+    /// Reuse the core's byte formatter so process memory reads the same as memory everywhere else.
+    private var memoryGauge: MetricGauge {
+        MetricGauge(
+            seriesId: "", metric: "rss", label: "Memory", value: process.memoryBytes,
+            max: nil, unitSuffix: "B", binaryScaled: true, history: [])
     }
 }
 

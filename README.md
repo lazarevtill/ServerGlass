@@ -102,7 +102,7 @@ SG_DEMO_HOST="root@127.0.0.1:2222" SG_DEMO_KEY="$PWD/fixtures/id_test" \
 |---|---|
 | `sg-model` | Domain types. No I/O, no async, `serde` only. Defines the `Source` trait everything hangs off. |
 | `sg-transport` | russh client, the batched shell protocol, capability detection. |
-| `sg-collect` | Built-in collectors: CPU, memory, load, filesystems, disk I/O, network, TCP. |
+| `sg-collect` | Built-in collectors: CPU, memory, load, filesystems, disk I/O, network, TCP, processes. |
 | `sg-core` | Request merging, rate derivation, the live store, the per-target runtime. |
 | `sg-ffi` | UniFFI surface and the UI-shaped view models. |
 | `sg-bindgen` | Binding generator, separate so `clap` never reaches the shipped library. |
@@ -120,9 +120,12 @@ because their `df`, `ps` and `ls` output differ enough that passing on one means
 - Agentless SSH transport, one round trip per refresh, nonce-framed batch protocol
 - Capability detection; collectors gate themselves on what the host can actually report
 - CPU (per-core and aggregate), memory, load, uptime, filesystems, disk I/O, network, TCP
+- Process table with per-process CPU and memory — what actually explains a busy host
 - Rate derivation with counter-reset and reconnect handling
 - Bounded live store, entity tree, connection lifecycle with backoff
-- UniFFI bindings; macOS SwiftUI app with the status grid and per-entity cards
+- UniFFI bindings; macOS SwiftUI app: fleet status page, per-host detail with widgets matched to
+  each metric's shape (rings for percentages, bars for capacities, numbers plus sparklines for
+  rates, tables for counts and processes)
 
 **Next**
 

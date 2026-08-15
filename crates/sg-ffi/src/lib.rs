@@ -21,10 +21,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use sg_core::{default_sources, TargetRuntime, TargetState};
 use sg_model::{now_ms, TargetId};
 
-use view::{connection_spec, entity_view, host_details, host_gauges};
+use view::{connection_spec, entity_view, host_details, host_gauges, top_processes, PROCESS_KIND};
 pub use view::{
     format_uptime, format_value, ConnectionState, DetailGroup, EntityView, MetricGauge,
-    TargetConfig, TargetSnapshot,
+    ProcessView, TargetConfig, TargetSnapshot,
 };
 
 uniffi::setup_scaffolding!();
@@ -261,17 +261,23 @@ fn build_snapshot(
     let caps = runtime.capabilities();
     let host = runtime.host_entity();
 
-    let (gauges, detail_groups, entities) = match host {
+    let (gauges, detail_groups, entities, processes) = match host {
         Some(host) => (
             host_gauges(store, &host.id),
             host_details(store, &host.id),
             store
                 .children_of(&host.id)
                 .into_iter()
+                // Processes are excluded here on purpose. There are hundreds, each with two series
+                // and a 300-point window; serialising them across the FFI twice a second would
+                // cost far more than the whole rest of the snapshot. The ranked few go in
+                // `top_processes` instead.
+                .filter(|e| e.kind.slug() != PROCESS_KIND)
                 .map(|e| entity_view(e, store))
                 .collect(),
+            top_processes(store, &host.id, 12),
         ),
-        None => (Vec::new(), Vec::new(), Vec::new()),
+        None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
     };
 
     TargetSnapshot {
@@ -285,6 +291,7 @@ fn build_snapshot(
         gauges,
         detail_groups,
         entities,
+        top_processes: processes,
         source_errors: tick.errors.iter().map(ToString::to_string).collect(),
         last_update_ms: now_ms(),
         round_trips: runtime.round_trips(),
