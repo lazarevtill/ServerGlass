@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ServerGlass.Core\ServerGlass.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    The native library the FFI tests exercise.
+
+    It is copied rather than skipped-if-missing on purpose. "A skipped test reports ok" is on this
+    project's list of things that look fine and are not — it is why SG_REQUIRE_FIXTURES exists — so
+    a missing sg_ffi.dll fails the FFI tests loudly instead of quietly testing nothing.
+    scripts/build-windows.ps1 and the CI job both run cargo before dotnet.
+  -->
+  <PropertyGroup>
+    <SgFfiDll Condition="'$(SgFfiDll)' == ''">$(MSBuildProjectDirectory)\..\..\..\target\debug\sg_ffi.dll</SgFfiDll>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(SgFfiDll)')">
+    <None Include="$(SgFfiDll)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>sg_ffi.dll</Link>
+    </None>
+  </ItemGroup>
+
+</Project>

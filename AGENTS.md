@@ -10,8 +10,8 @@ verified from a Windows machine, and the platform traps that have already caused
 One command verifies everything CI verifies, on either platform:
 
 ```bash
-./scripts/check.sh        # macOS or Linux
-pwsh scripts/check.ps1    # Windows
+./scripts/check.sh          # macOS or Linux
+.\scripts\check.ps1 -All    # Windows, including the WinUI app
 ```
 
 Both files are the same instructions for any agent, whichever tool is driving.

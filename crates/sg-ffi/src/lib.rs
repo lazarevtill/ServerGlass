@@ -13,6 +13,7 @@
 //! thread. A push-based event stream is the natural next step once the terminal lands, which does
 //! need one — a terminal cannot be polled.
 
+pub mod cabi;
 pub mod plain;
 mod sync;
 mod view;
@@ -73,7 +74,8 @@ struct Target {
 }
 
 /// What one command printed, and how it ended.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CommandResult {
     /// Everything it wrote, standard error included and in order.
     pub output: String,

@@ -188,8 +188,14 @@ every front-end.
   an rlib alongside its staticlib and cdylib, so the view models, health verdicts and plain-language
   wording arrive as ordinary Rust types. There is no binding step and nothing generated to keep in
   sync, which is why it is the only front-end that cannot drift from the core by construction.
-- **Windows** (planned) — `uniffi-bindgen-cs`, which is third-party and young; hand-written
-  `extern "C"` plus `csbindgen` is the documented fallback.
+- **Windows** — a hand-written `extern "C"` surface (`crates/sg-ffi/src/cabi.rs`), with `csbindgen`
+  generating the C# declarations from it. UniFFI has no C# backend, and `uniffi-bindgen-cs` is a
+  version behind — it targets uniffi 0.31 against this workspace's 0.32, and proc-macro-only
+  scaffolding leaves no `.udl` to fall back on. The payload crosses as JSON in an `{ok|err}`
+  envelope rather than as C structs: a snapshot nests vectors of records, an `Option<f64>` and a
+  fielded enum, and hand-maintaining that layout in two languages is the drift this project keeps
+  paying for. A test pins the exact field set, so a record that changes shape fails in Rust rather
+  than arriving in C# as a property that silently never populates.
 
 A second binding backend earns its keep immediately. `SgError` originally carried a `message` field;
 UniFFI maps an error enum onto a Kotlin `Exception` subclass, which already has `message`, and the
