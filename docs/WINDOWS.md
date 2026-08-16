@@ -194,3 +194,23 @@ implementation rather than exploration:
 
 The one thing not to do is invent behaviour. Every threshold, unit, verdict and piece of wording is
 already in `crates/sg-ffi`; a Windows view layer maps a level onto a colour and lays things out.
+
+
+## The fixtures will not start: reserved port ranges
+
+`./fixtures/up.sh` can fail with `ports are not available: exposing port TCP 127.0.0.1:2223`, with
+nothing listening on the port and nothing in `netstat`. Windows reserves blocks of TCP ports for
+Hyper-V, and the fixture ports 2222 and 2223 sit inside one of them on some machines:
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+A range such as `2180-2279` covers both. The reservation is made by the Host Network Service when
+it starts, so it moves between reboots; freeing it needs an elevated `net stop winnat`, a restart,
+or an explicit `netsh int ipv4 add excludedportrange ... store=persistent` claiming the ports back
+before HNS takes them.
+
+This is a machine condition, not a broken fixture — check it before concluding the containers are
+at fault. The Linux app's live tests accept `SG_FIXTURE_PORT` so they can be pointed at a fixture
+published somewhere outside the reserved range; the core's own live tests hardcode 2222 and 2223.

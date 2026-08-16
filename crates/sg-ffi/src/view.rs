@@ -542,6 +542,49 @@ pub fn format_value(value: f64, unit_suffix: &str, binary_scaled: bool) -> Strin
     }
 }
 
+/// Minimum sparkline span, as a fraction of the largest value in the window.
+///
+/// Range-scaling a chart lies in one direction and a zero baseline lies in the other. Storage
+/// sitting at 5.19% and ticking to 5.20% has a span of 0.01; stretched to full height it draws a
+/// cliff, and the chart screams that the disk just filled up. Flooring the span keeps genuinely
+/// flat series flat and amplifies only real movement. See DESIGN.md, "Charts must not lie in
+/// either direction".
+const NOISE_FLOOR: f64 = 0.05;
+
+/// Normalise a series to 0-1 for a sparkline, oldest first.
+///
+/// Here rather than in the front-ends because it is a rule about *what the chart claims*, not
+/// about how to draw a line — and because it was already written by hand in Swift and again in
+/// Kotlin, which is the shape invariant 3 exists to stop. The Linux app calls this; the Apple and
+/// Android layers still carry their own copies and should be moved onto it by someone who can
+/// build and run them.
+///
+/// A series that has not moved draws along the bottom of the box, which is what the Swift and
+/// Kotlin implementations already do — the point of the floor is that it draws *level*, not where
+/// that level sits. The midline is reserved for the one case with no range to scale against at
+/// all: every reading exactly zero.
+pub fn sparkline_points(history: &[f64]) -> Vec<f64> {
+    if history.is_empty() {
+        return Vec::new();
+    }
+    let highest = history.iter().copied().fold(f64::MIN, f64::max);
+    let lowest = history.iter().copied().fold(f64::MAX, f64::min);
+    let magnitude = highest.abs().max(lowest.abs());
+    let span = (highest - lowest).max(magnitude * NOISE_FLOOR);
+
+    history
+        .iter()
+        .map(|value| {
+            if span > 0.0 {
+                ((value - lowest) / span).clamp(0.0, 1.0)
+            } else {
+                // Every point identical and zero: there is no range to scale against at all.
+                0.5
+            }
+        })
+        .collect()
+}
+
 /// Format a duration in seconds as `12d 4h`, for uptime.
 pub fn format_uptime(seconds: f64) -> String {
     let total = seconds.max(0.0) as u64;
@@ -693,6 +736,44 @@ impl MetricGauge {
 mod tests {
     use super::*;
     use sg_model::{Sample, SourceId, Value};
+
+    #[test]
+    fn a_sparkline_spans_the_box_when_the_reading_really_moved() {
+        let points = sparkline_points(&[0.0, 50.0, 100.0]);
+        assert_eq!(points, vec![0.0, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn a_nearly_flat_series_draws_nearly_flat_rather_than_as_a_cliff() {
+        // Storage at 5.19% ticking to 5.20%. Scaled to the observed range alone this draws a
+        // full-height climb and reads as a disk about to fill up.
+        let points = sparkline_points(&[5.19, 5.19, 5.20]);
+        let highest = points.iter().copied().fold(f64::MIN, f64::max);
+        let lowest = points.iter().copied().fold(f64::MAX, f64::min);
+        assert!(
+            highest - lowest < 0.05,
+            "0.01 of movement on a 5.2 magnitude drew a span of {}",
+            highest - lowest
+        );
+    }
+
+    #[test]
+    fn a_series_that_has_not_moved_draws_level() {
+        // Level, not centred — matching the Swift and Kotlin implementations exactly. What matters
+        // is that there is no vertical variation to misread as movement.
+        assert_eq!(sparkline_points(&[4.0, 4.0, 4.0]), vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn an_all_zero_window_has_no_range_to_scale_against_and_uses_the_midline() {
+        assert_eq!(sparkline_points(&[0.0, 0.0]), vec![0.5, 0.5]);
+    }
+
+    #[test]
+    fn an_empty_window_produces_no_points_rather_than_a_panic() {
+        assert!(sparkline_points(&[]).is_empty());
+        assert_eq!(sparkline_points(&[7.0]), vec![0.0]);
+    }
 
     #[test]
     fn formats_bytes_with_binary_prefixes() {

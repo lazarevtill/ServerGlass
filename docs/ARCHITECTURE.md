@@ -184,7 +184,10 @@ four codebases.
 - **macOS / iOS / iPadOS** — UniFFI's Swift backend. The Swift wrapper and the UI target are shared
   between the Mac and iOS apps verbatim.
 - **Android** — UniFFI's Kotlin backend, calling into the `.so` through JNA. Built with `cargo-ndk`.
-- **Linux** (planned) — `gtk4-rs`, linking the core directly. No FFI at all.
+- **Linux** — `gtk4-rs` and libadwaita, linking the core directly. No FFI at all: `sg-ffi` builds
+  an rlib alongside its staticlib and cdylib, so the view models, health verdicts and plain-language
+  wording arrive as ordinary Rust types. There is no binding step and nothing generated to keep in
+  sync, which is why it is the only front-end that cannot drift from the core by construction.
 - **Windows** (planned) — `uniffi-bindgen-cs`, which is third-party and young; hand-written
   `extern "C"` plus `csbindgen` is the documented fallback.
 

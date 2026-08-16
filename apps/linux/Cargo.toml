@@ -1,0 +1,48 @@
+# The Linux app.
+#
+# Its own workspace on purpose, rather than a member of the root one.
+#
+# `cargo build --workspace` runs in the `rust:1.89-bookworm` CI container, which has no GTK
+# development packages and no reason to grow them — the core must keep building on a machine with
+# no desktop at all. Making this a member would mean every Rust job in the pipeline suddenly
+# needed libgtk-4-dev to compile a crate none of them are testing. The `linux:app` job installs
+# the toolkit and builds this instead.
+[workspace]
+
+[package]
+name = "sg-linux"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "ServerGlass for Linux: a GTK4 front-end that links the core directly."
+publish = false
+
+[lib]
+name = "sg_linux"
+path = "src/lib.rs"
+
+[[bin]]
+name = "serverglass"
+path = "src/main.rs"
+
+[dependencies]
+# The core, linked as an ordinary Rust library. There is no FFI on this platform: `sg-ffi` builds
+# an rlib alongside its staticlib/cdylib, so the same view models, health verdicts, plain-language
+# wording and number formatting the Swift and Kotlin apps receive over UniFFI arrive here as plain
+# Rust types. Invariant 3 costs nothing to keep when the logic is a function call away.
+sg-ffi = { path = "../../crates/sg-ffi" }
+sg-sync = { path = "../../crates/sg-sync" }
+
+gtk4 = { version = "0.9", features = ["v4_10"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_4"] }
+glib = "0.20"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+qrcode = { version = "0.14", default-features = false }
+tokio = { version = "1.53", features = ["rt-multi-thread", "net", "time"] }
+async-channel = "2"
+
+[dev-dependencies]
+tempfile = "3"
