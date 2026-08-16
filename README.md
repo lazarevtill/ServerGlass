@@ -298,8 +298,10 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
 
 - Setup still assumes someone who knows what a hostname and an SSH key are. The *reading*
   experience is written for a non-technical person; the *adding* experience is not yet.
-- CI runs the Rust suite only. The Swift and Kotlin tests exist and pass locally, but no macOS or
-  Android runner is configured to run them.
+- CI runs the Rust suite on Linux and on Windows. The Swift and Kotlin tests exist and pass
+  locally, but no macOS or Android runner is configured to run them.
+- Windows and Linux have no front-end yet. The core is built and tested on Windows in CI, so the
+  half that does the work is known to run there; the window around it is not written.
 - Sensor parsing is covered by tests against captured `hwmon` layouts, but no machine available
   here exposes hwmon chips, so the sweep has not been run against real sensor hardware.
 - CI builds and tests the Rust core only. No macOS or Android runner is configured, so the apps

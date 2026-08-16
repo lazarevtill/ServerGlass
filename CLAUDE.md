@@ -68,8 +68,10 @@ The live tests need the fixtures: `./fixtures/up.sh` (Debian and Alpine sshd con
 GNU-versus-busybox parsing differences). Without `SG_REQUIRE_FIXTURES=1` they skip themselves and
 report `ok`, which has already hidden a broken container once.
 
-**CI runs the Rust jobs only.** No macOS or Android runner is configured, so the Swift and Kotlin
-suites are yours to run before pushing. Check the pipeline afterwards — it has been left red for
+**CI runs the Rust jobs on Linux and Windows.** No macOS or Android runner is configured, so the
+Swift and Kotlin suites are yours to run before pushing. The Windows job is a shell runner that
+installs its own toolchain — it is the only thing checking that the core compiles for a platform
+none of us develops on, and it earned that on its first run by catching a Unix-only agent call. Check the pipeline afterwards — it has been left red for
 eight commits before now, because the tests passing locally says nothing about `fmt` and `clippy`.
 
 ## Things that look fine and are not
