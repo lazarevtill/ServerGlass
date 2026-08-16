@@ -91,6 +91,16 @@ Every one of these shipped, and every one was found by using the app rather than
   add a server because every test launch passed the host in by intent.
 - **The same code shape on two platforms is not the same behaviour.** Verify on each.
 
+## Working on Windows
+
+The core builds and tests there; the app does not exist. Setup, the PowerShell equivalents of the
+commands above, what can and cannot be verified from a Windows machine, and the platform traps
+that have already caused real bugs are in **[docs/WINDOWS.md](docs/WINDOWS.md)**.
+
+The short version: there is no `$HOME` (it is `USERPROFILE`), the SSH agent is Pageant rather than
+a Unix socket, and `#[cfg(unix)]` blocks are invisible until something compiles them. Do not claim
+a change is verified on Apple or Android from a Windows machine — say which platform you checked.
+
 ## Layout
 
 ```
@@ -102,6 +112,7 @@ crates/sg-ffi        the UniFFI surface: view models, health verdicts, plain lan
 apps/shared          SwiftUI views, shared byte for byte between macOS and iOS
 apps/android         Jetpack Compose
 apps/ios, apps/macos thin shells around apps/shared
+apps/windows         empty — the app is not written; the core is verified there in CI
 fixtures             docker compose sshd targets and a throwaway key
 scripts              build-{macos,ios,android}.sh, release.sh, make-icons.swift
 ```

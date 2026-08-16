@@ -233,6 +233,14 @@ pressure tells those apart, so "Waiting on storage" outranks any utilisation per
 SG_REQUIRE_FIXTURES=1 cargo test --workspace
 ```
 
+Working on this — as a person or as an agent — starts with three files:
+
+| | |
+|---|---|
+| [CLAUDE.md](CLAUDE.md) | The invariants, the traps, and how to verify a change. Read before editing. |
+| [AGENTS.md](AGENTS.md) | The same, for whichever agent tool is driving. |
+| [docs/WINDOWS.md](docs/WINDOWS.md) | Setup and the platform traps for Windows, where the core builds and the app does not exist yet. |
+
 `fixtures/up.sh` verifies each published port actually reaches the distribution it should. That
 check is not ceremony: container runtimes that proxy published ports can keep a stale forward
 pointing at a previous container, and the failure mode is silent — the BusyBox tests pass while
