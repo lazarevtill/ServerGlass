@@ -1,9 +1,10 @@
 # The same checks the canonical GitLab pipeline runs, for the public GitHub mirror.
 #
-# Kept deliberately in step with .gitlab-ci.yml: the core on Linux and on Windows, and the Linux
-# app in a job of its own because it is a separate cargo workspace that needs GTK. If you change
-# one, change the other — a mirror whose CI checks less than the original is worse than no mirror,
-# because the green tick claims something it did not verify.
+# Kept deliberately in step with .gitlab-ci.yml: the core on Linux and on Windows, the Linux app in
+# a job of its own because it is a separate cargo workspace that needs GTK, and the Windows app in
+# one of its own because it is C# and needs a .NET SDK. If you change one, change the other — a
+# mirror whose CI checks less than the original is worse than no mirror, because the green tick
+# claims something it did not verify.
 name: CI
 
 on:
@@ -25,8 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows is a target platform with no app yet. It earned its place in CI on the first run
-        # by catching a Unix-only agent call that had been sitting in the tree.
+        # Windows earned its place in CI on the first run by catching a Unix-only agent call that
+        # had been sitting in the tree. This job is the core only; the app has its own below.
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
@@ -65,3 +66,28 @@ jobs:
           cargo fmt -- --check
           cargo clippy --all-targets --locked -- -D warnings
           cargo test --locked
+
+  windows-app:
+    name: Windows app
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+          rustup default ${{ env.RUST_VERSION }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          # Pinned to the channel the app targets, for the same reason the Rust toolchain is.
+          dotnet-version: "9.0.x"
+      - uses: Swatinem/rust-cache@v2
+      # The core first: the app's project file refuses to build without sg_ffi.dll, because an app
+      # that compiles without the core only fails when somebody runs it.
+      - run: cargo build -p sg-ffi --locked
+      # The committed C# bindings must match the Rust they came from. Generated code that is
+      # allowed to go stale is a crash at runtime and nothing at build time.
+      - run: pwsh -File scripts/check-bindings.ps1
+      # Debug, and the core's path passed explicitly, so the profile the app links matches the one
+      # just built. A release app around a debug core would still pass and still be incoherent.
+      - run: dotnet test apps/windows/ServerGlass.Core.Tests/ServerGlass.Core.Tests.csproj -c Debug --nologo "-p:SgFfiDll=${{ github.workspace }}/target/debug/sg_ffi.dll"
+      - run: dotnet build apps/windows/ServerGlass/ServerGlass.csproj -c Debug --nologo "-p:SgFfiDll=${{ github.workspace }}/target/debug/sg_ffi.dll"

@@ -8,7 +8,14 @@
 # edits crates/sg-ffi/src/cabi.rs, does not regenerate, and the C# side keeps calling a signature
 # that no longer exists. That is a crash at runtime and nothing at build time.
 #
-# So this regenerates into a temporary directory and compares. It changes nothing.
+# Two details that are not incidental:
+#
+#   - It generates to a temporary file. An earlier version regenerated in place and compared
+#     hashes, which meant a *check* left the tree modified whenever it failed.
+#   - It compares with line endings normalised. The generator writes LF; git hands the working copy
+#     CRLF wherever core.autocrlf is on, which is the Windows default. Comparing bytes therefore
+#     failed on every fresh checkout while passing on the machine that had just run the generator —
+#     green locally, red in CI, for a difference that means nothing.
 #
 # UTF-8 with a BOM, for the reason spelled out at the top of check.ps1.
 
@@ -23,21 +30,28 @@ if (-not (Test-Path $committed)) {
     exit 1
 }
 
-$before = Get-FileHash $committed -Algorithm SHA256
+$temporary = Join-Path ([System.IO.Path]::GetTempPath()) ("sg-bindings-" + [guid]::NewGuid().ToString('N') + ".cs")
 
-cargo run --quiet -p sg-bindgen --bin csharp-bindgen
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "The binding generator failed." -ForegroundColor Red
-    exit 1
+try {
+    cargo run --quiet -p sg-bindgen --bin csharp-bindgen -- $temporary
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "The binding generator failed." -ForegroundColor Red
+        exit 1
+    }
+
+    function Normalised($path) {
+        [System.IO.File]::ReadAllText($path).Replace("`r`n", "`n").TrimEnd("`n")
+    }
+
+    if ((Normalised $committed) -ne (Normalised $temporary)) {
+        Write-Host "The committed C# bindings no longer match crates/sg-ffi/src/cabi.rs." -ForegroundColor Red
+        Write-Host "Regenerate and commit them:"
+        Write-Host "  cargo run -p sg-bindgen --bin csharp-bindgen"
+        exit 1
+    }
 }
-
-$after = Get-FileHash $committed -Algorithm SHA256
-
-if ($before.Hash -ne $after.Hash) {
-    Write-Host "The committed C# bindings are stale." -ForegroundColor Red
-    Write-Host "They have just been regenerated in place; commit the change."
-    Write-Host "  git diff -- apps/windows/ServerGlass.Core/Generated/NativeMethods.g.cs"
-    exit 1
+finally {
+    Remove-Item $temporary -ErrorAction SilentlyContinue
 }
 
 Write-Host "The C# bindings match crates/sg-ffi/src/cabi.rs." -ForegroundColor Green

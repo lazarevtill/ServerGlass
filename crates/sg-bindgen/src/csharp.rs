@@ -6,11 +6,16 @@
 //! generated from the Rust rather than transcribed by hand — which is the half of the fallback
 //! that keeps the two from drifting apart silently.
 //!
-//!     cargo run -p sg-bindgen --bin csharp-bindgen
+//!     cargo run -p sg-bindgen --bin csharp-bindgen              # write the committed file
+//!     cargo run -p sg-bindgen --bin csharp-bindgen -- <path>    # write somewhere else
 //!
 //! The output is committed, exactly as the generated Swift bindings under
 //! `apps/shared/ServerGlassFFI/generated` are, so a checkout builds without running a generator
 //! first. `scripts/build-windows.ps1` regenerates it and CI checks it is current.
+//!
+//! The optional path exists for that check: it generates to a temporary file and compares, so a
+//! verification run never leaves the tree dirty — a check that has to modify what it is checking
+//! is one nobody can run on a release branch.
 
 use std::path::PathBuf;
 
@@ -23,7 +28,10 @@ fn main() {
         .to_path_buf();
 
     let input = root.join("crates/sg-ffi/src/cabi.rs");
-    let output = root.join("apps/windows/ServerGlass.Core/Generated/NativeMethods.g.cs");
+    let output = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("apps/windows/ServerGlass.Core/Generated/NativeMethods.g.cs"));
 
     std::fs::create_dir_all(output.parent().expect("the output has a directory"))
         .expect("could not create the output directory");
