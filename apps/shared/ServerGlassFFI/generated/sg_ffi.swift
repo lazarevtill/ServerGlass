@@ -2228,6 +2228,11 @@ public func FfiConverterTypeSyncHostView_lower(_ value: SyncHostView) -> RustBuf
 
 /**
  * How to reach a host.
+ *
+ * The serde derives here and on the records below serve the C ABI in [`crate::cabi`], which moves
+ * whole view models across as JSON rather than describing them to a C compiler field by field.
+ * `camelCase` because that is what UniFFI already produces for Swift and Kotlin, so one property
+ * name is right on all four platforms.
  */
 public struct TargetConfig: Equatable, Hashable {
     public var host: String
@@ -2540,6 +2545,10 @@ public func FfiConverterTypeTargetSnapshot_lower(_ value: TargetSnapshot) -> Rus
 
 /**
  * Connection lifecycle, flattened for the FFI.
+ *
+ * Internally tagged for JSON, so C# reads `{"kind":"failed","message":…,"recoverable":true}`
+ * rather than serde's default nesting. A fielded enum is the one shape a hand-written C struct
+ * surface handles worst, and this is how it avoids being one.
  */
 
 public enum ConnectionState: Equatable, Hashable {

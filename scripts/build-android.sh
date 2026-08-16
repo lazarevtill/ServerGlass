@@ -39,7 +39,9 @@ echo "==> generating Kotlin bindings"
 # Generated from the host dylib: uniffi reads architecture-independent metadata, and there is no
 # .so to introspect on the build machine's own architecture.
 cargo build -p sg-ffi
-cargo run -q -p sg-bindgen -- generate \
+# `--bin` is not optional: the crate also ships a C# generator for the Windows app, so
+# an unqualified `cargo run` is ambiguous and fails.
+cargo run -q -p sg-bindgen --bin uniffi-bindgen -- generate \
     --library target/debug/libsg_ffi.dylib \
     --language kotlin \
     --out-dir "$APP/build/generated/uniffi"

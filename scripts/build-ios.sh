@@ -25,7 +25,9 @@ echo "==> generating Swift bindings"
 # Generated from the host-architecture dylib: the metadata uniffi-bindgen reads is
 # architecture-independent, and a simulator .a has no dylib to introspect.
 cargo build -p sg-ffi
-cargo run -q -p sg-bindgen -- generate \
+# `--bin` is not optional: the crate also ships a C# generator for the Windows app, so
+# an unqualified `cargo run` is ambiguous and fails.
+cargo run -q -p sg-bindgen --bin uniffi-bindgen -- generate \
     --library target/debug/libsg_ffi.dylib \
     --language swift \
     --out-dir "$GENERATED"

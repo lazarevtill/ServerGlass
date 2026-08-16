@@ -23,7 +23,9 @@ else
 fi
 
 echo "==> generating Swift bindings"
-cargo run -q -p sg-bindgen -- generate \
+# `--bin` is not optional: the crate also ships a C# generator for the Windows app, so
+# an unqualified `cargo run` is ambiguous and fails.
+cargo run -q -p sg-bindgen --bin uniffi-bindgen -- generate \
     --library "target/$PROFILE/libsg_ffi.dylib" \
     --language swift \
     --out-dir "$GENERATED"

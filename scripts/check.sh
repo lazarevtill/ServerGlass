@@ -40,6 +40,16 @@ else
     cargo metadata --locked --manifest-path apps/linux/Cargo.toml --format-version 1 >/dev/null
 fi
 
+# Every generator call has to name its binary. `sg-bindgen` ships two, the uniffi one for Apple and
+# Android and the C# one for Windows, so a call that does not say which is ambiguous and fails. It
+# broke the macOS, iOS and Android builds at once when the second binary landed, and nothing caught
+# it because no test builds an app.
+step "build scripts name their generator"
+if grep -rn 'cargo run.*sg-bindgen' scripts/build-*.sh scripts/build-*.ps1 | grep -v -- '--bin'; then
+    echo "the calls above must pass --bin: sg-bindgen has more than one binary" >&2
+    exit 1
+fi
+
 if [[ "${1:-}" == "--all" ]]; then
     # No runner exists for these, so nothing but a developer checks them.
     step "swift";  swift test --package-path apps
