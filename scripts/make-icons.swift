@@ -139,6 +139,9 @@ for base in [16, 32, 128, 256, 512] {
     writePNG(size: base * 2, style: .full, to: "\(iconset)/icon_\(base)x\(base)@2x.png")
 }
 
+// F-Droid's listing wants a 512 square, separate from anything in the APK.
+writePNG(size: 512, style: .full, to: "fastlane/metadata/android/en-US/images/icon.png")
+
 // iOS: modern Xcode takes a single 1024 and derives the rest.
 let appicon = "\(root)/apps/ios/Assets.xcassets/AppIcon.appiconset"
 writePNG(size: 1024, style: .full, to: "\(appicon)/icon-1024.png")

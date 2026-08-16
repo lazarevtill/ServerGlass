@@ -1,0 +1,9 @@
+Temperature, fan and power readings from every sensor a machine exposes, each judged against its own critical point rather than one number for everything.
+
+Run a command on a server from the app, over the connection it already has open.
+
+Sign in by pasting a private key — a phone has no ssh-agent.
+
+Edit and remove saved servers; long-press a server for both.
+
+Trusted host keys are now actually recorded, so a server whose identity changes later is detected rather than silently trusted.

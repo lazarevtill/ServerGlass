@@ -1,0 +1,74 @@
+# F-Droid build recipe for ServerGlass.
+#
+# Copy this into a fork of https://gitlab.com/fdroid/fdroiddata as
+# `metadata/cloud.lazarev.serverglass.yml`, then open a merge request with the `New App` label.
+#
+# UNVERIFIED. This recipe has not been run through `fdroid build` yet — see docs/FDROID.md for how
+# to test it before submitting. The parts most likely to need adjusting are the Rust toolchain
+# installation and the NDK path, because the buildserver image decides both.
+
+Categories:
+  - Internet
+  - System
+License: MIT OR Apache-2.0
+AuthorName: Till Lazarev
+SourceCode: https://github.com/lazarevtill/ServerGlass
+IssueTracker: https://github.com/lazarevtill/ServerGlass/issues
+Changelog: https://github.com/lazarevtill/ServerGlass/releases
+
+AutoName: ServerGlass
+Description: |-
+  ServerGlass reads how your servers are doing over SSH, and installs nothing on them. If you can
+  already ssh into a machine, you can watch it — there is no agent to deploy, no port to open, and
+  nothing to undo later.
+
+  The default screen is written for someone who does not know what SSH is: a plain-language
+  verdict, three readings that mean something without training, and the names of whatever is
+  working hardest. Every other reading is one tap away — per-core CPU, memory, each network
+  interface, each disk, filesystems, temperatures, sockets.
+
+  Passwords and keys are kept in the Android Keystore and sent to nothing but the server you are
+  connecting to. No account, no upload, and no measurement written to disk.
+
+RepoType: git
+Repo: https://github.com/lazarevtill/ServerGlass.git
+
+Builds:
+  - versionName: 0.3.0
+    versionCode: 5
+    commit: v0.3.0
+    subdir: apps/android/app
+    gradle:
+      - yes
+    # The core is Rust, cross-compiled to the NDK. None of this is downloaded at build time by
+    # Gradle — the toolchain is installed here, from source archives, before the build runs.
+    sudo:
+      - apt-get update
+      - apt-get install -y curl build-essential pkg-config
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
+        | sh -s -- -y --default-toolchain 1.89.0 --profile minimal
+      - $HOME/.cargo/bin/rustup target add aarch64-linux-android
+      - $HOME/.cargo/bin/cargo install cargo-ndk --version 4.1.2 --locked
+    prebuild:
+      - export PATH=$HOME/.cargo/bin:$PATH
+      # minSdk 26 must match app/build.gradle.kts: the NDK links against that API level's libc.
+      - cd $$SRC$$ && cargo ndk -t arm64-v8a -P 26
+        -o apps/android/app/src/main/jniLibs build --release -p sg-ffi
+      # The Kotlin bindings are generated from the *host* library: uniffi reads architecture
+      # independent metadata, and there is no Android .so to introspect on the build machine.
+      - cd $$SRC$$ && cargo build -p sg-ffi
+      - cd $$SRC$$ && cargo run -q -p sg-bindgen -- generate
+        --library target/debug/libsg_ffi.so
+        --language kotlin
+        --out-dir apps/android/app/build/generated/uniffi
+    scanignore:
+      # The .so is produced by the prebuild step above, from source in this same repository. It is
+      # not a prebuilt blob — nothing binary is committed.
+      - apps/android/app/src/main/jniLibs
+
+AllowedAPKSigningKeys: ~
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9.]+$
+CurrentVersion: 0.3.0
+CurrentVersionCode: 5

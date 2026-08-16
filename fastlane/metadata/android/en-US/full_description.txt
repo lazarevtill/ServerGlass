@@ -1,0 +1,41 @@
+ServerGlass reads how your servers are doing over SSH, and installs nothing on them. If you can
+already ssh into a machine, you can watch it — there is no agent to deploy, no port to open, and
+nothing to undo later.
+
+The default screen is written for someone who does not know what SSH is. Instead of a wall of
+numbers it gives a plain-language verdict — "Everything looks good", "Storage is almost full",
+"Running very hot" — always with the size of the problem in it. Below that: the processor, memory
+and storage, and the names of whatever is working hardest.
+
+Every other reading is one tap away: per-core CPU, the memory breakdown, each network interface,
+each disk, every mounted filesystem, temperatures and fan speeds, sockets and TCP retransmits.
+
+<b>How it works</b>
+
+One SSH connection per server, and one round trip per refresh however many readings are on screen.
+It reads /proc and /sys — the files the kernel already publishes — so a Raspberry Pi, a VPS and a
+Proxmox host all work the same way with no setup on the machine itself.
+
+<b>Features</b>
+
+* Plain-language health verdict, or every reading, your choice
+* Per-core CPU, memory, network, disks, filesystems, sensors, processes
+* Temperature judged against each chip's own critical point
+* Containers and virtual machines via cgroup v2 — Docker, Podman, LXC, QEMU
+* Run a command on a server without leaving the app
+* Sign in with a password, a pasted key, or a key file
+* Works on a folded phone, an unfolded foldable, and a tablet
+
+<b>Your credentials stay on your device</b>
+
+Passwords and keys are kept in the Android Keystore and are never sent anywhere but the server you
+are connecting to. Nothing is uploaded, there is no account, and no measurement is written to disk
+— readings live in memory for a few minutes so the charts can be drawn, then they are gone.
+
+Host keys are remembered the first time you connect, so an impostor on a later connection is
+detected rather than trusted.
+
+<b>Free software</b>
+
+MIT or Apache-2.0. The whole thing, including the Rust core shared with the macOS, iOS and Linux
+versions, is at the source link below.
