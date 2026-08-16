@@ -28,19 +28,20 @@ New here? [The guide](docs/GUIDE.md) walks through every flow with pictures.
 | **macOS** | Built. Sidebar, fleet grid, per-host detail. |
 | **iOS / iPadOS** | Built. Navigation stack on a phone, two-column split on iPad. |
 | **Android** | Built. Foldable-aware two-pane layout. |
+| **Linux** | Built. GTK4 and libadwaita, linking the core directly with no FFI at all. |
 | Windows 11 | Not started. WinUI 3 planned. |
-| Linux | Not started. GTK4, would link the core directly with no FFI. |
 
 All of them share one Rust core: the collectors, the scheduler, the rate maths, the health
 verdicts, the wording and the number formatting are written once.
 
-**258 Rust tests**, including live runs against Debian and Alpine SSH fixtures and a regression
-test asserting that a full refresh costs exactly one network round trip — plus **7 Swift** and
-**7 Kotlin** tests over the parts those layers own: how a host is stored, what stays out of the
-record, and what an unreadable file costs.
+**263 Rust tests** in the core, including live runs against Debian and Alpine SSH fixtures and a
+regression test asserting that a full refresh costs exactly one network round trip — plus **28**
+over the Linux app, four of which drive it against a real host, and **7 Swift** and **7 Kotlin**
+tests over the parts those layers own: how a host is stored, what stays out of the record, and
+what an unreadable file costs.
 
 ```bash
-./scripts/check.sh        # fmt, clippy, build, test — everything CI runs
+./scripts/check.sh        # fmt, clippy, build, test — the core, plus the Linux app if GTK is here
 ./scripts/check.sh --all  # plus the Swift and Kotlin suites, which CI has no runner for
 pwsh scripts/check.ps1    # the same, on Windows
 ```
@@ -57,6 +58,9 @@ Built installers for each tagged version are on the
   to Google Play, so your browser or file manager will ask you to allow the install.
 - **iOS** — no `.ipa`, because distributing one needs an Apple Developer signing identity. Build it
   from source with `scripts/build-ios.sh`.
+- **Linux** — build it with `scripts/build-linux.sh --install`, which puts it under `~/.local`
+  and needs no root. GTK 4.10 and libadwaita 1.4 are the floor, so Ubuntu 24.04, Debian trixie and
+  Fedora 39 onwards are fine; Debian bookworm's GTK is too old.
 
 ## Why this exists
 
@@ -121,6 +125,7 @@ Requirements: Rust 1.85+. Then per platform:
 
 ```bash
 ./scripts/build-macos.sh          # Rust core → Swift bindings → ServerGlass.app
+./scripts/build-linux.sh --run    # GTK4 app, no bindings step — it links the core directly
 ./scripts/build-ios.sh --run      # ...and launch in a booted simulator
 ./scripts/build-android.sh --run  # ...and install on a running emulator
 ```

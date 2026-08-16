@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=ServerGlass
+GenericName=Server monitor
+Comment=Watch servers over SSH without installing anything on them
+Exec=serverglass
+Icon=cloud.lazarev.ServerGlass
+Terminal=false
+Categories=System;Monitor;Network;
+Keywords=server;ssh;monitor;cpu;memory;disk;
+StartupNotify=true

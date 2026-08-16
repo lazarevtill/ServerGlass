@@ -29,8 +29,8 @@ use view::{
     PROCESS_KIND,
 };
 pub use view::{
-    format_uptime, format_value, ConnectionState, DetailGroup, EntityView, MetricGauge,
-    ProcessView, SimpleTile, TargetConfig, TargetSnapshot,
+    format_uptime, format_value, sparkline_points, ConnectionState, DetailGroup, EntityView,
+    MetricGauge, ProcessView, SimpleTile, TargetConfig, TargetSnapshot,
 };
 
 uniffi::setup_scaffolding!();

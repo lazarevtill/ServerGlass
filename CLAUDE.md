@@ -1,11 +1,12 @@
 # Working on ServerGlass
 
-Agentless SSH server monitoring for macOS, iOS, Android, Windows and Linux. A Rust core does all
+Agentless SSH server monitoring for macOS, iOS, Android, Linux and Windows. A Rust core does all
 the work; each platform contributes only a view layer.
 
 Read [README.md](README.md) for what it is, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it
-is built, and [docs/DESIGN.md](docs/DESIGN.md) for why the dashboard looks the way it does. This
-file is the part that is easy to get wrong.
+is built, [docs/DESIGN.md](docs/DESIGN.md) for why the dashboard looks the way it does, and
+[docs/GUIDE.md](docs/GUIDE.md) for what each flow looks like to the person using it. This file is
+the part that is easy to get wrong.
 
 ## The invariants
 
@@ -62,6 +63,8 @@ hard way:
 ```bash
 ./scripts/check.sh                                  # fmt, clippy, build, 258 tests
 ./scripts/check.sh --all                            # plus Swift and Kotlin
+pwsh scripts/check.ps1                              # the same, on Windows
+./scripts/build-linux.sh --run                      # build and run the GTK app
 SG_REQUIRE_FIXTURES=1 cargo test --workspace        # turns "fixture missing" into a failure
 swift test --package-path apps                      # Apple storage and vault
 (cd apps/android && gradle :app:testDebugUnitTest)  # Android record format
@@ -69,11 +72,37 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all -- --check
 ```
 
+Narrowing it down while iterating — the whole suite is the gate, not the loop:
+
+```bash
+cargo test -p sg-collect memory                     # one crate, tests matching a substring
+cargo test -p sg-core --test end_to_end             # one integration target
+cargo test -p sg-collect cpu::tests::iowait_counts_as_idle_not_busy -- --nocapture
+swift test --package-path apps --filter HostStoreTests
+(cd apps/android && gradle :app:testDebugUnitTest --tests '*HostStoreTest*')
+```
+
+The Linux app has its own suite, including four tests that drive it against a live fixture:
+
+```bash
+cargo test --manifest-path apps/linux/Cargo.toml
+SG_FIXTURE_PORT=2322 cargo test --manifest-path apps/linux/Cargo.toml --test live_engine
+```
+
+`SG_FIXTURE_PORT` exists because Windows reserves TCP ranges for Hyper-V and 2222/2223 can land
+inside one; see docs/WINDOWS.md before concluding a container is broken.
+
+Three integration targets need the SSH fixtures and skip without them —
+`sg-core/tests/end_to_end.rs`, `sg-transport/tests/live.rs`, `sg-ffi/tests/live_snapshot.rs`. The
+fourth, `sg-sync/tests/pairing_over_tcp.rs`, pairs two devices over a loopback socket and always
+runs.
+
 The live tests need the fixtures: `./fixtures/up.sh` (Debian and Alpine sshd containers, catching
 GNU-versus-busybox parsing differences). Without `SG_REQUIRE_FIXTURES=1` they skip themselves and
 report `ok`, which has already hidden a broken container once.
 
-**CI runs the Rust jobs on Linux and Windows.** No macOS or Android runner is configured, so the
+**CI is GitLab (`.gitlab-ci.yml`, gitlab.lazarev.cloud) and runs the Rust jobs on Linux and
+Windows.** No macOS or Android runner is configured, so the
 Swift and Kotlin suites are yours to run before pushing. The Windows job is a shell runner that
 installs its own toolchain — it is the only thing checking that the core compiles for a platform
 none of us develops on, and it earned that on its first run by catching a Unix-only agent call.
@@ -115,16 +144,36 @@ crates/sg-collect    the collectors, one module per subsystem
 crates/sg-core       target registry, tick scheduler, rate derivation, ring buffer
 crates/sg-ffi        the UniFFI surface: view models, health verdicts, plain language
 crates/sg-sync       device pairing: the QR handshake, the LAN transfer, the merge rules
+crates/sg-bindgen    the uniffi-bindgen binary, separate so clap never reaches the shipped library
 apps/shared          SwiftUI views, shared byte for byte between macOS and iOS
 apps/android         Jetpack Compose
 apps/ios, apps/macos thin shells around apps/shared
-apps/windows         empty — the app is not written; the core is verified there in CI
+apps/linux           GTK4 and libadwaita — its own cargo workspace, links the core with no FFI
 fixtures             docker compose sshd targets and a throwaway key
-scripts              build-{macos,ios,android}.sh, release.sh, make-icons.swift
+scripts              build-{macos,ios,android}.sh, check.{sh,ps1}, release.sh, make-icons.swift
 ```
+
+There is no `apps/windows`: the app is not written, and Windows is covered only by the CI job that
+compiles and tests the core.
+
+`apps/linux` is deliberately **not** a member of the root cargo workspace. The core has to keep
+building on a machine with no desktop, and a member would put `libgtk-4-dev` in the way of every
+Rust job in the pipeline. It has its own `Cargo.lock`, its own `linux:app` CI job, and
+`./scripts/check.sh` runs it whenever GTK is installed — set `SG_REQUIRE_LINUX_APP=1` to turn a
+missing toolkit into a failure rather than a skip.
+
+It is also the only front-end that cannot drift from the core: it links `sg-ffi` as an rlib, so a
+view model or a health verdict is a function call rather than a generated binding. When a rule
+lives in Swift and Kotlin but not in Rust — the sparkline noise floor was written by hand in both —
+the fix is to move it into `sg-ffi` and call it from here, not to write it a third time.
 
 `apps/shared/ServerGlassUI` is compiled by both Apple apps. A change there lands on the Mac and the
 phone at once; build both.
+
+The Swift bindings in `apps/shared/ServerGlassFFI/generated/` are produced by `sg-bindgen` from the
+*compiled* `libsg_ffi`, not from the source, which is why the build scripts always order it Rust
+build → bindgen → Swift build. They are committed, so a change to the `sg-ffi` surface is only real
+once `./scripts/build-macos.sh` has regenerated them and the result is in the commit.
 
 ## Never commit
 
