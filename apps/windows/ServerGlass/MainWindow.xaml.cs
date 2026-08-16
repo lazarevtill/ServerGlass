@@ -18,6 +18,15 @@ public sealed partial class MainWindow : Window
         Title = "ServerGlass";
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1240, 860));
 
+        // WinUI draws its own title bar, and it does not read the executable's icon resource — the
+        // one <ApplicationIcon> embeds, which the taskbar, Alt-Tab and the Start Menu shortcut all
+        // pick up. Without this the bar shows the generic placeholder while every other surface
+        // shows the real mark, which looks like a half-finished app rather than a missing setting.
+        // SetIcon wants a file, so the .ico ships beside the executable as well as inside it;
+        // scripts/package-windows.ps1 checks it is in the payload.
+        // Qualified: Microsoft.UI.Xaml.Shapes.Path is in scope here too.
+        AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "ServerGlass.ico"));
+
         // The title bar does not follow the app's requested theme on its own, so a dark app gets a
         // light bar bolted to the top of it. Painted to match the sidebar it sits above.
         var bar = AppWindow.TitleBar;

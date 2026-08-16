@@ -71,6 +71,11 @@ Built installers for each tagged version are on the
 - **Linux** — build it with `scripts/build-linux.sh --install`, which puts it under `~/.local`
   and needs no root. GTK 4.10 and libadwaita 1.4 are the floor, so Ubuntu 24.04, Debian trixie and
   Fedora 39 onwards are fine; Debian bookworm's GTK is too old.
+- **Windows** — build the installer with `.\scripts\package-windows.ps1 -Install`, which puts it
+  under `%LOCALAPPDATA%\Programs` and needs no administrator. There is no Windows build on the
+  releases page: the installer has to be compiled on Windows and `scripts/release.sh` runs on a
+  Mac. It is unsigned, so SmartScreen asks once — More info > Run anyway. Windows 10 1809 is the
+  floor.
 
 ## Why this exists
 

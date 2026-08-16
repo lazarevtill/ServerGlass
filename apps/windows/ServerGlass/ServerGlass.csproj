@@ -25,6 +25,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <AssemblyName>ServerGlass</AssemblyName>
+    <!--
+      An unpackaged app has no manifest for the shell to read an icon out of, so the executable's
+      own resource is the only one there is: the taskbar, Alt-Tab, the Start Menu shortcut and the
+      installer all end up here. Assets\ServerGlass.ico is derived from the 1024px master that
+      scripts/make-icons.swift draws, by scripts/make-windows-icon.ps1 - the mark is not drawn twice.
+    -->
+    <ApplicationIcon>Assets\ServerGlass.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -37,6 +44,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ServerGlass.Core\ServerGlass.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    The icon ships as a file as well as being embedded by <ApplicationIcon> above. WinUI's own title
+    bar cannot read the embedded resource, and AppWindow.SetIcon takes a path - see MainWindow.
+  -->
+  <ItemGroup>
+    <None Include="Assets\ServerGlass.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <!--
@@ -55,6 +72,41 @@
       <Link>sg_ffi.dll</Link>
     </None>
   </ItemGroup>
+
+  <!--
+    Publish the compiled XAML.
+
+    `dotnet publish` drops ServerGlass.pri and the .xbf files that `dotnet build` writes, and the
+    app then dies on its first line of UI with "XamlParseException: XAML parsing failed" out of
+    MainWindow.InitializeComponent. The .xbf files are the compiled XAML and the .pri is the index
+    that finds them; without them there is nothing to parse. Every test passes, the build is clean,
+    and only the installed copy is broken - it was found by installing it.
+
+    The cause is a seam between two SDKs. The .NET SDK does not publish .pri files, because they
+    used to be a UWP concept. The Windows App SDK knows better and ships a target that puts them
+    back, AddProjectPriToResolvedFileToPublish, but that target lives in the MSIX packaging targets
+    and those are imported only when EnableMsixTooling is true. This app is unpackaged on purpose,
+    so it generates a .pri during the build and has nothing to publish it. The .xbf files fall
+    through the same gap.
+
+    So this adds what the build already produced. The errors below are the point: a publish that
+    quietly omits either one produces a folder that looks complete, installs cleanly, and crashes.
+  -->
+  <Target Name="PublishTheCompiledXaml" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <_CompiledXaml Include="$(OutDir)**\*.xbf" />
+      <_ProjectPri Include="$(ProjectPriFullPath)" Condition="Exists('$(ProjectPriFullPath)')" />
+      <ResolvedFileToPublish Include="@(_CompiledXaml);@(_ProjectPri)">
+        <RelativePath>%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+
+    <Error Condition="'@(_CompiledXaml)' == ''"
+           Text="No .xbf files were found in $(OutDir). The XAML compiler did not run, and publishing would produce an app that crashes on launch." />
+    <Error Condition="'@(_ProjectPri)' == ''"
+           Text="$(ProjectPriFullPath) is missing. That is the resource index the compiled XAML is found through, and publishing without it would produce an app that crashes on launch." />
+  </Target>
 
   <Target Name="WarnWhenTheCoreIsMissing" BeforeTargets="Build" Condition="!Exists('$(SgFfiDll)')">
     <!-- An error, not a warning: an app that builds without the core only fails when someone runs

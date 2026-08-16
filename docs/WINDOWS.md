@@ -218,7 +218,9 @@ fast on purpose.
 `windows:app` builds the app. It additionally installs the .NET SDK into the project directory, and
 it checks one thing the core's job cannot: that the committed C# bindings still match the Rust they
 were generated from. Generated code that is allowed to go stale is a crash at runtime and nothing at
-build time, so `scripts\check-bindings.ps1` regenerates into place and fails if anything moved.
+build time, so `scripts\check-bindings.ps1` regenerates into a temporary file and fails if anything
+moved. Into a temporary file, not over the committed one: a check that modifies what it is checking
+cannot be run on a release branch.
 
 They are split so the failure is legible: a red `rust:windows` means the core broke on a platform
 nobody develops on, a red `windows:app` means the app did.
@@ -237,11 +239,69 @@ Build and run it:
 ```powershell
 .\scripts\build-windows.ps1                    # debug
 .\scripts\build-windows.ps1 -Release -Publish  # a folder you can copy anywhere
+.\scripts\package-windows.ps1 -Install         # an installer, installed here
 ```
 
 `WindowsPackageType=None` and `WindowsAppSDKSelfContained=true`, so it runs from a folder with no
-MSIX identity, no signing certificate and no separately-installed runtime. That is also what makes
-it buildable on a CI runner that has nothing but an SDK.
+MSIX identity and no signing certificate, and carries its own copy of the Windows App SDK. That is
+also what makes it buildable on a CI runner that has nothing but an SDK.
+
+The .NET runtime is the exception, and the distinction matters when you hand the folder to someone.
+An ordinary build is framework-dependent: it needs the .NET 9 **Desktop** Runtime, which every
+machine with the SDK already has and almost no other machine does — so it launches for whoever
+built it and fails for whoever received it. `-Publish` therefore passes `SelfContained=true` and
+carries the runtime too, which is what takes the folder from about 20 MB to about 220 MB.
+
+Publishing has one more trap, and it is the reason `ServerGlass.csproj` carries a target called
+`PublishTheCompiledXaml`. `dotnet publish` drops `ServerGlass.pri` and the `.xbf` files that
+`dotnet build` writes beside the executable — the compiled XAML and the index that finds it — so
+the app crashes in `MainWindow.InitializeComponent` with `XamlParseException` the moment it is
+started from a published folder. The .NET SDK does not publish `.pri` files because they used to be
+UWP-only; the Windows App SDK ships a target that adds them back, but only inside the MSIX
+packaging targets, which an unpackaged app never imports. The csproj target closes that seam and
+fails the build if either input is missing. `scripts\package-windows.ps1` checks the finished
+payload for them as well, because this shipped once.
+
+### Making an installer
+
+```powershell
+.\scripts\package-windows.ps1              # dist\ServerGlass-<version>-windows-x64-setup.exe
+.\scripts\package-windows.ps1 -Install     # and install it on this machine
+.\scripts\package-windows.ps1 -SkipBuild   # package the publish folder that is already there
+```
+
+Inno Setup compiles it (`winget install JRSoftware.InnoSetup`), from
+`apps\windows\installer\ServerGlass.iss`. The version comes from `Cargo.toml` and is passed to both
+the compiler and the build, so the installer, the Apps & Features entry and the executable's own
+file version are the same number — nothing here has a second copy to forget. Left to itself MSBuild
+stamps `1.0.0.0`, which is what a crash report would otherwise quote.
+
+The install is **per-user**: `%LOCALAPPDATA%\Programs\ServerGlass`, a shortcut in your own Start
+Menu, no administrator and no UAC prompt — the bargain `scripts/build-linux.sh --install` makes
+with `~/.local`. Everything the app stores is per-user already, including DPAPI blobs no other
+account can decrypt, so a machine-wide install would buy nothing.
+
+Two things it deliberately does not do. It does not delete `%LOCALAPPDATA%\ServerGlass` on
+uninstall — the host inventory, the pinned host keys and the encrypted credentials live there, and
+someone upgrading should not have to re-approve every host key. And it is not signed, so SmartScreen
+shows "Windows protected your PC" on the first run and needs *More info > Run anyway*; that is the
+same missing certificate as the un-notarised macOS build, not a fault in the file.
+
+This is not part of `scripts/release.sh`, which builds the macOS and Android artefacts, because an
+Inno Setup installer has to be compiled on Windows and that script runs on a Mac. Nothing on the
+releases page is a Windows build.
+
+### The icon
+
+`apps\windows\ServerGlass\Assets\ServerGlass.ico` is generated, by
+`.\scripts\make-windows-icon.ps1`, from the 1024px master that `scripts/make-icons.swift` draws.
+The mark exists in exactly one place — that Swift file — and this only reshapes its output into the
+container Windows wants, because CoreGraphics does not run here. Regenerate it if the mark changes;
+nothing in the build does it for you.
+
+An unpackaged app has no manifest for the shell to read, so the executable's own icon resource is
+the only one there is: `<ApplicationIcon>` in the csproj feeds the taskbar, Alt-Tab, the Start Menu
+shortcut and the installer alike.
 
 ### How it reaches the core
 

@@ -129,6 +129,10 @@ Every one of these shipped, and every one was found by using the app rather than
   special-case that one metric and the third front-end did not know to.
 - **A green build is not a running app.** The WinUI app crashed on launch — a layout cycle, which
   is a runtime failure by construction — with every test passing and no compiler warning.
+- **A running app is not a shippable one.** `dotnet publish` silently omitted the compiled XAML and
+  its resource index, which `dotnet build` writes, so the Windows app ran from `bin` and crashed in
+  its own constructor once installed. Nothing before the installer touches the publish path, so
+  nothing before the installer could have caught it. Install the thing and open it.
 
 ## Working on Windows
 
@@ -163,7 +167,8 @@ apps/ios, apps/macos thin shells around apps/shared
 apps/linux           GTK4 and libadwaita — its own cargo workspace, links the core with no FFI
 apps/windows         WinUI 3 on .NET 9 — reaches the core through the C ABI in sg-ffi/src/cabi.rs
 fixtures             docker compose sshd targets and a throwaway key
-scripts              build-{macos,ios,android,windows}.{sh,ps1}, check.{sh,ps1}, release.sh
+scripts              build-{macos,ios,android,windows}.{sh,ps1}, check.{sh,ps1}, release.sh,
+                     package-windows.ps1 for the Windows installer
 ```
 
 `apps/windows` is not a cargo crate at all — it is two C# projects and a WinUI app, built by
@@ -172,6 +177,14 @@ scripts              build-{macos,ios,android,windows}.{sh,ps1}, check.{sh,ps1},
 as JSON, because UniFFI has no C# backend and `uniffi-bindgen-cs` is pinned a uniffi version behind
 this workspace. `csbindgen` generates the C# declarations from those signatures; the result is
 committed and `scripts/check-bindings.ps1` fails if it goes stale.
+
+Its installer is `apps/windows/installer/ServerGlass.iss`, compiled by
+`.\scripts\package-windows.ps1` and not by `scripts/release.sh` — Inno Setup runs on Windows and
+that script runs on a Mac. It installs per-user, under `%LOCALAPPDATA%\Programs`, and leaves
+`%LOCALAPPDATA%\ServerGlass` alone when uninstalling, because that is where the host inventory and
+the pinned host keys are. The payload is a **self-contained** publish: a framework-dependent one
+needs the .NET Desktop Runtime, which the machine that built it always has and the machine that
+receives it usually does not. See docs/WINDOWS.md.
 
 `apps/linux` is deliberately **not** a member of the root cargo workspace. The core has to keep
 building on a machine with no desktop, and a member would put `libgtk-4-dev` in the way of every
