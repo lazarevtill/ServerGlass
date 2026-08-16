@@ -46,8 +46,10 @@ recipe works in F-Droid's buildserver, because two things there are outside this
   into root's `$HOME` is invisible by the time it is used. The recipe therefore installs to
   `/opt/rust` and puts that on `PATH`, leaving `CARGO_HOME` alone so cargo can still write its
   registry cache as the build user. This was a real defect in the first draft of the recipe.
-- **The NDK.** The recipe asks for `ndk: r27c` and passes `$$NDK$$` through as `ANDROID_NDK_HOME`.
-  If their image names it differently, this is the line to change.
+- **The NDK.** The recipe asks for `ndk: r27d` — 27.3.13750724, the version
+  `scripts/build-android.sh` names — and passes `$$NDK$$` through as `ANDROID_NDK_HOME`. The point
+  release is not load-bearing; `-P 26` matching `minSdk` is. If the buildserver image does not
+  carry r27d, r27c is a safe substitution and this is the line to change.
 
 To go further, run it in their buildserver:
 

@@ -44,9 +44,12 @@ Builds:
     subdir: apps/android/app
     gradle:
       - yes
-    # Must match ANDROID_NDK_HOME in scripts/build-android.sh and the -P 26 below: the NDK links
-    # against a specific API level's libc, and minSdk in app/build.gradle.kts has to agree.
-    ndk: r27c
+    # r27d is 27.3.13750724, the version scripts/build-android.sh names. What actually has to match
+    # is the -P 26 below and minSdk in app/build.gradle.kts — the NDK links against that API
+    # level's libc, and a mismatch is a loader failure at runtime rather than an error at build
+    # time. The r27 point release itself is not load-bearing, so if the buildserver image does not
+    # carry r27d, r27c is a safe substitution.
+    ndk: r27d
     # The core is Rust, cross-compiled to the NDK. Gradle downloads none of it — the toolchain is
     # installed here, before the build runs, and everything it compiles is source in this repo.
     #
