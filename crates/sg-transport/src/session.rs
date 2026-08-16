@@ -329,6 +329,50 @@ impl SshSession {
     }
 }
 
+/// Try every identity the agent holds, in order.
+///
+/// Generic over the agent's transport because there is no single one: a Unix socket on Unix, a
+/// Pageant pipe on Windows. Everything after the connection is identical, so it lives here once
+/// rather than being written twice behind `#[cfg]`.
+async fn authenticate_with_agent<S>(
+    handle: &mut Handle<ClientHandler>,
+    spec: &ConnectionSpec,
+    mut agent: russh::keys::agent::client::AgentClient<S>,
+) -> Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let identities = agent
+        .request_identities()
+        .await
+        .map_err(|e| TransportError::NoAgent(e.to_string()))?;
+    let hash_alg = handle.best_supported_rsa_hash().await?.flatten();
+
+    // The agent may hold a dozen keys and the server accepts one. Trying each in turn is what
+    // OpenSSH does; the server's per-connection auth attempt limit bounds the loop.
+    for identity in identities {
+        let public_key = match &identity {
+            russh::keys::agent::AgentIdentity::PublicKey { key, .. } => key.clone(),
+            // Certificate auth needs a different call path; skip rather than fail so a certificate
+            // sitting alongside usable keys does not block the connection.
+            russh::keys::agent::AgentIdentity::Certificate { .. } => continue,
+        };
+        if let Ok(result) = handle
+            .authenticate_publickey_with(&spec.user, public_key, hash_alg, &mut agent)
+            .await
+        {
+            if result.success() {
+                return Ok(());
+            }
+        }
+    }
+
+    Err(TransportError::AgentNoIdentity {
+        user: spec.user.clone(),
+        host: spec.host.clone(),
+    })
+}
+
 async fn authenticate(handle: &mut Handle<ClientHandler>, spec: &ConnectionSpec) -> Result<()> {
     let auth_failed = || TransportError::AuthFailed {
         user: spec.user.clone(),
@@ -375,37 +419,27 @@ async fn authenticate(handle: &mut Handle<ClientHandler>, spec: &ConnectionSpec)
         }
 
         Auth::Agent => {
-            let mut agent = AgentClient::connect_env()
-                .await
-                .map_err(|e| TransportError::NoAgent(e.to_string()))?;
-            let identities = agent
-                .request_identities()
-                .await
-                .map_err(|e| TransportError::NoAgent(e.to_string()))?;
-            let hash_alg = handle.best_supported_rsa_hash().await?.flatten();
-
-            // The agent may hold a dozen keys and the server accepts one. Trying each in turn is
-            // what OpenSSH does; the server's per-connection auth attempt limit bounds the loop.
-            for identity in identities {
-                let public_key = match &identity {
-                    russh::keys::agent::AgentIdentity::PublicKey { key, .. } => key.clone(),
-                    // Certificate auth needs a different call path; skip rather than fail so a
-                    // certificate sitting alongside usable keys does not block the connection.
-                    russh::keys::agent::AgentIdentity::Certificate { .. } => continue,
-                };
-                if let Ok(result) = handle
-                    .authenticate_publickey_with(&spec.user, public_key, hash_alg, &mut agent)
+            // The agent differs by platform and so does its stream type, which is why this
+            // dispatches rather than assigning to one variable: Unix talks to `$SSH_AUTH_SOCK`,
+            // Windows talks to Pageant — the protocol OpenSSH for Windows and PuTTY both serve.
+            #[cfg(unix)]
+            {
+                let agent = AgentClient::connect_env()
                     .await
-                {
-                    if result.success() {
-                        return Ok(());
-                    }
-                }
+                    .map_err(|e| TransportError::NoAgent(e.to_string()))?;
+                return authenticate_with_agent(handle, spec, agent).await;
             }
-            return Err(TransportError::AgentNoIdentity {
-                user: spec.user.clone(),
-                host: spec.host.clone(),
-            });
+            #[cfg(windows)]
+            {
+                let agent = AgentClient::connect_pageant().await;
+                return authenticate_with_agent(handle, spec, agent).await;
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                return Err(TransportError::NoAgent(
+                    "no ssh-agent on this platform".into(),
+                ));
+            }
         }
     }
 
