@@ -5,6 +5,11 @@
 # one of its own because it is C# and needs a .NET SDK. If you change one, change the other — a
 # mirror whose CI checks less than the original is worse than no mirror, because the green tick
 # claims something it did not verify.
+#
+# One job runs here and not there, deliberately: `android`. GitHub's Linux runners ship the Android
+# SDK and NDK preinstalled and GitLab's docker executor does not, so this is the only place the
+# F-Droid build path can be exercised without standing up a new image. That path is otherwise
+# untested by anything automatic, and it is the one a rejected submission would be traced back to.
 name: CI
 
 on:
@@ -91,3 +96,49 @@ jobs:
       # just built. A release app around a debug core would still pass and still be incoherent.
       - run: dotnet test apps/windows/ServerGlass.Core.Tests/ServerGlass.Core.Tests.csproj -c Debug --nologo "-p:SgFfiDll=${{ github.workspace }}/target/debug/sg_ffi.dll"
       - run: dotnet build apps/windows/ServerGlass/ServerGlass.csproj -c Debug --nologo "-p:SgFfiDll=${{ github.workspace }}/target/debug/sg_ffi.dll"
+
+  android:
+    name: Android app (the F-Droid build path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Rust and the Android target
+        run: |
+          rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+          rustup default ${{ env.RUST_VERSION }}
+          rustup target add aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      # Pinned to the version scripts/build-android.sh and the F-Droid recipe both name. cargo-ndk
+      # resolves the NDK from ANDROID_NDK_HOME, so the two have to agree.
+      - run: cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Pick the NDK the recipe asks for
+        run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+      # The three prebuild steps from docs/fdroid/cloud.lazarev.serverglass.yml, in order. If this
+      # job fails, the F-Droid recipe is broken — that is the entire point of running it.
+      #
+      # -P 26 must match minSdk in app/build.gradle.kts: the NDK links against that API level's
+      # libc, and a mismatch is a loader failure at runtime rather than an error here.
+      - name: Cross-compile the core for arm64-v8a
+        run: cargo ndk -t arm64-v8a -P 26 -o apps/android/app/src/main/jniLibs build --release -p sg-ffi
+      # Generated from the host library: uniffi reads architecture-independent metadata, and there
+      # is no Android .so to introspect on the build machine's own architecture.
+      - run: cargo build -p sg-ffi --locked
+      # `--bin` is not optional: sg-bindgen also ships a C# generator, so an unqualified
+      # `cargo run -p sg-bindgen` is ambiguous and fails.
+      - name: Generate the Kotlin bindings
+        run: |
+          cargo run -q -p sg-bindgen --bin uniffi-bindgen -- generate \
+            --library target/debug/libsg_ffi.so \
+            --language kotlin \
+            --out-dir apps/android/app/build/generated/uniffi
+      # The Kotlin tests cover the record format, and had no runner anywhere until this job.
+      - name: Test and assemble
+        working-directory: apps/android
+        run: |
+          gradle --no-daemon :app:testDebugUnitTest
+          gradle --no-daemon :app:assembleRelease

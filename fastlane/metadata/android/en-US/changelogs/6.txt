@@ -1,0 +1,8 @@
+Pair two devices to copy your server list across, by scanning a QR code. The list and the pinned
+host keys transfer; passwords never do — the new device asks for each one and keeps it in its own
+keystore.
+
+ServerGlass now runs on Windows and Linux too, so the readings look the same everywhere.
+
+Fixed: uptime showed raw seconds on some screens. Long-pressing a saved server offers Edit and
+Remove rather than a blank form. Container memory read high, counting reclaimable cache.

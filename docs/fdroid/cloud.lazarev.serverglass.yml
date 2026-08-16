@@ -3,18 +3,22 @@
 # Copy this into a fork of https://gitlab.com/fdroid/fdroiddata as
 # `metadata/cloud.lazarev.serverglass.yml`, then open a merge request with the `New App` label.
 #
-# UNVERIFIED. This recipe has not been run through `fdroid build` yet — see docs/FDROID.md for how
-# to test it before submitting. The parts most likely to need adjusting are the Rust toolchain
-# installation and the NDK path, because the buildserver image decides both.
+# The build steps here have been dry-run against a clean clone outside the development tree (see
+# docs/FDROID.md), but not yet inside F-Droid's own buildserver. The parts most likely still to
+# need adjusting are the Rust install location and the NDK, because their image decides both.
 
 Categories:
   - Internet
   - System
 License: MIT OR Apache-2.0
 AuthorName: Till Lazarev
+AuthorEmail: lazarevtill@lazarev.cloud
 SourceCode: https://github.com/lazarevtill/ServerGlass
 IssueTracker: https://github.com/lazarevtill/ServerGlass/issues
-Changelog: https://github.com/lazarevtill/ServerGlass/releases
+# The per-version changelogs themselves, rather than the GitHub releases page: releases are
+# published on the canonical GitLab, so the mirror's releases page is empty and would be a dead
+# end for anyone who clicked it from the F-Droid listing.
+Changelog: https://github.com/lazarevtill/ServerGlass/tree/main/fastlane/metadata/android/en-US/changelogs
 
 AutoName: ServerGlass
 Description: |-
@@ -34,41 +38,52 @@ RepoType: git
 Repo: https://github.com/lazarevtill/ServerGlass.git
 
 Builds:
-  - versionName: 0.3.0
-    versionCode: 5
-    commit: v0.3.0
+  - versionName: 0.4.0
+    versionCode: 6
+    commit: v0.4.0
     subdir: apps/android/app
     gradle:
       - yes
-    # The core is Rust, cross-compiled to the NDK. None of this is downloaded at build time by
-    # Gradle — the toolchain is installed here, from source archives, before the build runs.
+    # Must match ANDROID_NDK_HOME in scripts/build-android.sh and the -P 26 below: the NDK links
+    # against a specific API level's libc, and minSdk in app/build.gradle.kts has to agree.
+    ndk: r27c
+    # The core is Rust, cross-compiled to the NDK. Gradle downloads none of it — the toolchain is
+    # installed here, before the build runs, and everything it compiles is source in this repo.
+    #
+    # It goes to /opt/rust rather than $HOME because `sudo:` runs as root and `prebuild:` does not,
+    # so anything installed into root's home is invisible by the time it is needed. CARGO_HOME is
+    # deliberately left alone for the same reason inverted: cargo must write its registry cache at
+    # build time, as the build user, into a directory that user owns.
     sudo:
       - apt-get update
       - apt-get install -y curl build-essential pkg-config
-      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
-        | sh -s -- -y --default-toolchain 1.89.0 --profile minimal
-      - $HOME/.cargo/bin/rustup target add aarch64-linux-android
-      - $HOME/.cargo/bin/cargo install cargo-ndk --version 4.1.2 --locked
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+      - env RUSTUP_HOME=/opt/rust CARGO_HOME=/opt/rust sh /tmp/rustup.sh -y
+        --default-toolchain 1.89.0 --profile minimal --no-modify-path
+      - env RUSTUP_HOME=/opt/rust CARGO_HOME=/opt/rust /opt/rust/bin/rustup target add aarch64-linux-android
+      - env RUSTUP_HOME=/opt/rust CARGO_HOME=/opt/rust /opt/rust/bin/cargo install cargo-ndk --version 4.1.2 --locked
+      - chmod -R a+rX /opt/rust
     prebuild:
-      - export PATH=$HOME/.cargo/bin:$PATH
-      # minSdk 26 must match app/build.gradle.kts: the NDK links against that API level's libc.
+      - export RUSTUP_HOME=/opt/rust PATH=/opt/rust/bin:$PATH ANDROID_NDK_HOME=$$NDK$$
+      # minSdk 26 must match app/build.gradle.kts.
       - cd $$SRC$$ && cargo ndk -t arm64-v8a -P 26
         -o apps/android/app/src/main/jniLibs build --release -p sg-ffi
       # The Kotlin bindings are generated from the *host* library: uniffi reads architecture
       # independent metadata, and there is no Android .so to introspect on the build machine.
       - cd $$SRC$$ && cargo build -p sg-ffi
-      - cd $$SRC$$ && cargo run -q -p sg-bindgen -- generate
+      # `--bin` is not optional. sg-bindgen also ships a C# generator for the Windows app, so an
+      # unqualified `cargo run -p sg-bindgen` is ambiguous and fails. This matters most when
+      # AutoUpdateMode copies this block forward to a release that has both binaries.
+      - cd $$SRC$$ && cargo run -q -p sg-bindgen --bin uniffi-bindgen -- generate
         --library target/debug/libsg_ffi.so
         --language kotlin
         --out-dir apps/android/app/build/generated/uniffi
     scanignore:
       # The .so is produced by the prebuild step above, from source in this same repository. It is
-      # not a prebuilt blob — nothing binary is committed.
+      # not a prebuilt blob — nothing binary is committed, and `git ls-files` will confirm it.
       - apps/android/app/src/main/jniLibs
-
-AllowedAPKSigningKeys: ~
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.3.0
-CurrentVersionCode: 5
+CurrentVersion: 0.4.0
+CurrentVersionCode: 6

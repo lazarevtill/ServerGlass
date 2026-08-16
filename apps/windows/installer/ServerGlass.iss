@@ -22,7 +22,7 @@
 #define AppExe "ServerGlass.exe"
 
 #ifndef AppVersion
-  #error AppVersion was not passed in. Run scripts\package-windows.ps1, or ISCC /DAppVersion=0.3.0
+  #error AppVersion was not passed in. Run scripts\package-windows.ps1, or ISCC /DAppVersion=0.4.0
 #endif
 #ifndef SourceDir
   #error SourceDir was not passed in. It is the publish folder: ...\win-x64\publish

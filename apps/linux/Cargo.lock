@@ -2127,14 +2127,14 @@ dependencies = [
 
 [[package]]
 name = "sg-collect"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "sg-model",
 ]
 
 [[package]]
 name = "sg-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "sg-collect",
  "sg-model",
@@ -2145,7 +2145,7 @@ dependencies = [
 
 [[package]]
 name = "sg-ffi"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "sg-linux"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-channel",
  "glib",
@@ -2178,14 +2178,14 @@ dependencies = [
 
 [[package]]
 name = "sg-model"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "sg-sync"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64",
  "chacha20poly1305",
@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "sg-transport"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "russh",
  "sg-model",
