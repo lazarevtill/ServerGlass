@@ -121,8 +121,10 @@ A staged plan, cheapest and safest first. Each stage stands alone.
   pin that *differs* from one already held is never auto-applied — it surfaces as the same "this
   server's identity is different from last time" that a live mismatch produces. A sync channel that
   can quietly rewrite a pin is a machine-in-the-middle with extra steps.
-- Transport: option B is enough here. The inventory is low-sensitivity and the pins are public; both
-  still get encrypted, but a compromised store is an inventory leak rather than a breach.
+- Transport: **QR pairing over the local network** — see
+  [QR pairing](#qr-pairing-the-right-shape-with-one-correction). No server, no account, no cloud,
+  and it fits the case that actually motivates syncing: two devices in the same room. The encrypted
+  export file covers the case where they are not.
 
 This removes the retyping that motivates syncing at all, and the worst case is bounded.
 
@@ -201,9 +203,13 @@ consent cannot be made unmistakable in the UI, build only the first route.
 
 ### If they simply want their list on both devices
 
-For the inventory and pins, with no server anywhere: an **encrypted export file** the user moves
-themselves — AirDrop, Files, a USB stick, an email to themselves. A passphrase, Argon2id, an AEAD,
-and no network protocol to get wrong.
+Two mechanisms for two situations, covered in full under
+[QR pairing](#qr-pairing-the-right-shape-with-one-correction):
+
+- **Both devices in the room** — QR pairing over the local network. No passphrase, no server.
+- **The other device absent, or set up later** — an **encrypted export file** the user moves
+  themselves: AirDrop, Files, a USB stick, an email to themselves. A passphrase, Argon2id, an AEAD,
+  and no network protocol to get wrong.
 
 Be honest about what it is not: there is no revocation (anyone who ever had the file and the
 passphrase keeps that access), and the strength is entirely the passphrase. It is appropriate
@@ -212,6 +218,83 @@ precisely because it carries the inventory, not the keys.
 **Do not put the private keys in iCloud Drive, Google Drive or Dropbox**, encrypted or otherwise.
 Standard SSH key guidance is explicit that private keys stay local and out of cloud-synced folders,
 and an app that offers a convenient way to break that rule is worse than one that offers nothing.
+
+## QR pairing: the right shape, with one correction
+
+Showing a QR on one device and scanning it with the other is the best answer for a home user, and
+it is what Signal, Matrix, 1Password and passkey cross-device authentication all converge on. The
+camera is an **out-of-band channel**: short-range, requiring physical presence, and able to carry
+256 bits that a human would never type correctly. It solves the hard problem in pairing — proving
+which device you are talking to without trusting a server.
+
+**The correction: do not put a shared secret in the QR.**
+
+A symmetric key on a screen is readable by anything that can see the screen. The security
+literature is blunt about this — a visual channel can be observed, and shoulder-surfing or a camera
+across the room is a demonstrated attack, not a theoretical one. Screenshots make it worse: a
+screenshot of a QR is as good as the original, and it outlives the moment.
+
+Put the **receiving device's public key** in the QR instead. Then anyone who photographs it, films
+it, or shoulder-surfs it learns a public key, which is worth nothing.
+
+### The exchange
+
+1. **The new device shows a QR** containing: its freshly generated public key, a random session
+   identifier, and where to reach it on the local network. Roughly a hundred bytes — nowhere near
+   the ~2,900-byte QR limit, which is why the payload must never go in the code itself.
+2. **The existing device scans it**, derives a shared key, and encrypts the payload to it.
+3. **Both screens show the same short verification code** — four to six digits derived from both
+   public keys. The user checks they match and taps confirm on both.
+4. **The payload transfers directly over the local network.** No server, no cloud, no account. Both
+   devices are in the same room on the same Wi-Fi, which is the entire scenario.
+5. **The session is one-time and short-lived.** The QR expires in a minute or two, the key pair is
+   discarded after use, and a second scan of the same code does nothing.
+
+Step 3 is not ceremony. Without it, someone who scans the QR before you do — or a device on the
+same network racing to answer — could pair instead of your phone. The matching-numbers check is the
+cheapest known defence against that, and it is the same thing Bluetooth numeric comparison and
+Signal's safety numbers are doing.
+
+### Where the passphrase belongs — and where it does not
+
+With the exchange above, **a passphrase adds nothing to the transfer.** The QR already carries more
+entropy than any passphrase a person will type, the channel is already authenticated by the
+matching numbers, and the payload never touches a server. Asking for a passphrase here would be
+friction bought with no security.
+
+The passphrase belongs to the *other* job: the **offline export file**, for when the second device
+is not in the room — a new phone set up next week, a replacement for a lost one. There is no live
+channel to authenticate, so the file's secrecy is entirely the passphrase, and it needs Argon2id and
+an AEAD to be worth anything.
+
+Two jobs, two mechanisms:
+
+| | Both devices present | Device absent or later |
+|---|---|---|
+| **Mechanism** | QR pairing over the LAN | Encrypted export file |
+| **Secret** | Ephemeral, in the exchange | The user's passphrase |
+| **Server** | None | None (the user moves the file) |
+| **Revocation** | Not applicable — one-time transfer | None; anyone with file and passphrase keeps access |
+
+### Should credentials ride the QR?
+
+A one-time, in-person, device-to-device transfer is materially different from continuous cloud
+sync: no server holds anything, nothing persists, and the user is physically present at both ends.
+On that basis it is defensible, and it is how password managers move a vault to a new phone.
+
+It is still second best. Per-device keys in `authorized_keys` remain better, because after a QR
+transfer both devices hold the same credential and revoking one means rotating for all — the exact
+property the per-device design exists to avoid. If credential transfer is offered, it should be a
+deliberate one-time choice, worded plainly, and the app should offer to set up a device key instead.
+
+### What this does not protect against
+
+- **A compromised device at either end.** Pairing authenticates devices, not their integrity.
+- **A user who confirms without reading the numbers.** The check only works if it is checked; make
+  the numbers large and the confirm button deliberate.
+- **Someone standing next to you during the whole exchange.** They cannot use the QR, but they can
+  watch the verification code and the screen. This is a physical-presence protocol; presence cuts
+  both ways.
 
 ## What not to do
 
@@ -239,3 +322,6 @@ and an app that offers a convenient way to break that rule is worse than one tha
 - [SSH key management best practices](https://ctrlops.io/blog/ssh-key-management-best-practices)
 - [Smallstep — Build a tiny certificate authority for your homelab](https://smallstep.com/blog/build-a-tiny-ca-with-raspberry-pi-yubikey/)
 - [Smallstep — Run an SSH CA and connect to hosts using SSH certificates](https://smallstep.com/docs/tutorials/ssh-certificate-login/)
+- [Survey and Systematization of Secure Device Pairing (arXiv)](https://arxiv.org/pdf/1709.02690)
+- [1Password — Security of signing in with a QR code](https://support.1password.com/qr-code-security/)
+- [Safe QR code connections — why a symmetric key on screen is shoulder-surfable](https://borisreitman.medium.com/safe-qr-code-connections-f79ef42260e7)
