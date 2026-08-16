@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    WinUI 3 on .NET 9, unpackaged.
+
+    WindowsPackageType=None so the app runs from a folder without an MSIX identity or a signing
+    certificate, and WindowsAppSDKSelfContained so it does not need the runtime installed
+    separately. Between them, `dotnet build` produces something that launches — which is what makes
+    this buildable on a CI runner that has nothing but an SDK.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>ServerGlass</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>false</SelfContained>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>ServerGlass</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" />
+    <!-- Renders the pairing offer. MIT, and used only for the module matrix - the drawing is ours,
+         so this pulls in no imaging stack. -->
+    <PackageReference Include="QRCoder" Version="1.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ServerGlass.Core\ServerGlass.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    The Rust core, copied in beside the executable.
+
+    scripts/build-windows.ps1 runs cargo first and passes the profile; this default keeps a plain
+    `dotnet build` working for anyone who has already built the workspace.
+  -->
+  <PropertyGroup>
+    <SgFfiDll Condition="'$(SgFfiDll)' == ''">$(MSBuildProjectDirectory)\..\..\..\target\debug\sg_ffi.dll</SgFfiDll>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(SgFfiDll)')">
+    <None Include="$(SgFfiDll)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>sg_ffi.dll</Link>
+    </None>
+  </ItemGroup>
+
+  <Target Name="WarnWhenTheCoreIsMissing" BeforeTargets="Build" Condition="!Exists('$(SgFfiDll)')">
+    <!-- An error, not a warning: an app that builds without the core only fails when someone runs
+         it, and "it compiled" is not the same as "it works". -->
+    <Error Text="sg_ffi.dll was not found at $(SgFfiDll). Build the Rust core first: cargo build -p sg-ffi (or run scripts/build-windows.ps1, which does both)." />
+  </Target>
+
+</Project>

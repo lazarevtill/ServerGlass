@@ -38,16 +38,17 @@ New here? [The guide](docs/GUIDE.md) walks through every flow with pictures.
 | **iOS / iPadOS** | Built. Navigation stack on a phone, two-column split on iPad. |
 | **Android** | Built. Foldable-aware two-pane layout. |
 | **Linux** | Built. GTK4 and libadwaita, linking the core directly with no FFI at all. |
-| Windows 11 | Not started. WinUI 3 planned. |
+| **Windows 10/11** | Built. WinUI 3 on .NET 9, reaching the core through a hand-written C ABI. |
 
 All of them share one Rust core: the collectors, the scheduler, the rate maths, the health
 verdicts, the wording and the number formatting are written once.
 
-**263 Rust tests** in the core, including live runs against Debian and Alpine SSH fixtures and a
+**272 Rust tests** in the core, including live runs against Debian and Alpine SSH fixtures and a
 regression test asserting that a full refresh costs exactly one network round trip — plus **28**
-over the Linux app, four of which drive it against a real host, and **7 Swift** and **7 Kotlin**
-tests over the parts those layers own: how a host is stored, what stays out of the record, and
-what an unreadable file costs.
+over the Linux app, four of which drive it against a real host, **34 C#** over the Windows app,
+twelve of which call the real native library, and **7 Swift** and **7 Kotlin** tests over the parts
+those layers own: how a host is stored, what stays out of the record, and what an unreadable file
+costs.
 
 ```bash
 ./scripts/check.sh        # fmt, clippy, build, test — the core, plus the Linux app if GTK is here
@@ -253,7 +254,7 @@ Working on this — as a person or as an agent — starts with three files:
 |---|---|
 | [CLAUDE.md](CLAUDE.md) | The invariants, the traps, and how to verify a change. Read before editing. |
 | [AGENTS.md](AGENTS.md) | The same, for whichever agent tool is driving. |
-| [docs/WINDOWS.md](docs/WINDOWS.md) | Setup and the platform traps for Windows, where the core builds and the app does not exist yet. |
+| [docs/WINDOWS.md](docs/WINDOWS.md) | Setup, the WinUI app, and the platform traps for Windows. |
 | [docs/SYNC.md](docs/SYNC.md) | How devices pair and transfer, and why credentials are not part of it. |
 
 `fixtures/up.sh` verifies each published port actually reaches the distribution it should. That
@@ -315,17 +316,16 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
 - WebAssembly plugin SDK (WIT + wasmtime); plugins are pure functions that request data and never
   perform I/O
 - `Sink` exporters, for handing live samples to an external metrics and alerting system
-- A Windows 11 front-end (WinUI 3)
 
 **Known gaps**
 
 - Setup still assumes someone who knows what a hostname and an SSH key are. The *reading*
   experience is written for a non-technical person; the *adding* experience is not yet.
-- CI runs the Rust suite on Linux and on Windows, and builds and tests the Linux app. The Swift
-  and Kotlin tests exist and pass locally, but no macOS or Android runner is configured to run
-  them.
-- Windows has no front-end yet. The core is built and tested on Windows in CI, so the half that
-  does the work is known to run there; the window around it is not written.
+- CI runs the Rust suite on Linux and on Windows, and builds and tests the Linux and Windows apps.
+  The Swift and Kotlin tests exist and pass locally, but no macOS or Android runner is configured
+  to run them.
+- The Windows app cannot scan a pairing QR, because a desktop has no camera. It shows one to
+  receive an inventory and takes a pasted code to send one.
 - The Linux app keeps a password or key passphrase in memory for the run rather than in the Secret
   Service. Nothing is written to disk and the app says so plainly, but it does not yet remember a
   password between launches the way the Keychain and the Android Keystore do.

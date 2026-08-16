@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The bridge to the Rust core. Deliberately plain net9.0 rather than a Windows-targeted TFM: it
+    holds no UI, so the test project can exercise every line of it without a display, and the app
+    layer above stays the only thing that needs WinUI.
+  -->
+  <PropertyGroup>
+    <!-- `-windows` rather than plain net9.0: DPAPI is a Windows API, and declaring the platform is
+         what lets the platform-compatibility analyzer check the calls rather than the developer. -->
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- DPAPI. Pinned to the 9.x line rather than the newest overall: the 10.x releases target the
+         .NET 10 runtime, and matching the runtime family is what "latest stable" means here. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.19" />
+  </ItemGroup>
+
+</Project>

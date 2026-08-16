@@ -1,7 +1,8 @@
 # Syncing across devices
 
 Research, a recommendation, and — for Stage 1 — the protocol as built. `crates/sg-sync` implements
-the pairing handshake, the transfer and the merge rules; the app screens are not written yet.
+the pairing handshake, the transfer and the merge rules. The Linux and Windows apps have screens for
+it; the Apple and Android ones do not yet.
 
 The question — "sync my servers across my devices" — hides four separate decisions with opposite
 risk profiles. Treating them as one is how sync features become the weakest part of an application.

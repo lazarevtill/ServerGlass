@@ -18,7 +18,8 @@ use crate::view::MetricGauge;
 use crate::ConnectionState;
 
 /// How a host is doing, in one word and one sentence.
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HostHealth {
     /// `ok`, `busy`, `problem`, `offline`, `checking`.
     pub level: String,

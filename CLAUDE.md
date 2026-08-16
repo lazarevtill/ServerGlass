@@ -61,9 +61,9 @@ hard way:
 ## Verifying
 
 ```bash
-./scripts/check.sh                                  # fmt, clippy, build, 258 tests
+./scripts/check.sh                                  # fmt, clippy, build, 272 tests
 ./scripts/check.sh --all                            # plus Swift and Kotlin
-pwsh scripts/check.ps1                              # the same, on Windows
+.\scripts\check.ps1 -All                            # the same, on Windows, plus the WinUI app
 ./scripts/build-linux.sh --run                      # build and run the GTK app
 SG_REQUIRE_FIXTURES=1 cargo test --workspace        # turns "fixture missing" into a failure
 swift test --package-path apps                      # Apple storage and vault
@@ -102,10 +102,11 @@ GNU-versus-busybox parsing differences). Without `SG_REQUIRE_FIXTURES=1` they sk
 report `ok`, which has already hidden a broken container once.
 
 **CI is GitLab (`.gitlab-ci.yml`, gitlab.lazarev.cloud) and runs the Rust jobs on Linux and
-Windows.** No macOS or Android runner is configured, so the
-Swift and Kotlin suites are yours to run before pushing. The Windows job is a shell runner that
-installs its own toolchain — it is the only thing checking that the core compiles for a platform
-none of us develops on, and it earned that on its first run by catching a Unix-only agent call.
+Windows, the Linux app on Linux, and the Windows app on Windows.** No macOS or Android runner is
+configured, so the Swift and Kotlin suites are yours to run before pushing. The Windows jobs are a
+shell runner that installs its own toolchain — `rust:windows` is the only thing checking that the
+core compiles for a platform none of us develops on, and it earned that on its first run by
+catching a Unix-only agent call.
 
 Check the pipeline after pushing. It was left red for eight commits once, because tests passing
 locally says nothing about `fmt` and `clippy`.
@@ -123,17 +124,28 @@ Every one of these shipped, and every one was found by using the app rather than
   unit-tested, and was called with a hardcoded `1`.
 - **Driving a screen from a debug intent is not driving the app.** Android shipped with no way to
   add a server because every test launch passed the host in by intent.
-- **The same code shape on two platforms is not the same behaviour.** Verify on each.
+- **The same code shape on two platforms is not the same behaviour.** Verify on each. The Windows
+  app rendered uptime as `11324 s` where the phone says `3h 8m`, because Swift and Kotlin both
+  special-case that one metric and the third front-end did not know to.
+- **A green build is not a running app.** The WinUI app crashed on launch — a layout cycle, which
+  is a runtime failure by construction — with every test passing and no compiler warning.
 
 ## Working on Windows
 
-The core builds and tests there; the app does not exist. Setup, the PowerShell equivalents of the
-commands above, what can and cannot be verified from a Windows machine, and the platform traps
-that have already caused real bugs are in **[docs/WINDOWS.md](docs/WINDOWS.md)**.
+The core and the app both build and test there. Setup, the PowerShell equivalents of the commands
+above, what can and cannot be verified from a Windows machine, and the platform traps that have
+already caused real bugs are in **[docs/WINDOWS.md](docs/WINDOWS.md)**.
 
 The short version: there is no `$HOME` (it is `USERPROFILE`), the SSH agent is Pageant rather than
-a Unix socket, and `#[cfg(unix)]` blocks are invisible until something compiles them. Do not claim
-a change is verified on Apple or Android from a Windows machine — say which platform you checked.
+a Unix socket, `#[cfg(unix)]` blocks are invisible until something compiles them, and the setup
+needs two things beyond Rust that nothing tells you about until a build fails several minutes in —
+the MSVC **C++ workload** (Build Tools can be installed without it) and **NASM**. Do not claim a
+change is verified on Apple or Android from a Windows machine — say which platform you checked.
+
+`scripts/check.ps1` and the other PowerShell scripts are UTF-8 **with a BOM**, and that is
+load-bearing rather than incidental: Windows PowerShell 5.1 reads a BOM-less file as the ANSI
+codepage, and an em dash then decodes to a character it treats as a closing quote, so the script
+fails to parse entirely. Keep the BOM if you rewrite one.
 
 ## Layout
 
@@ -149,12 +161,17 @@ apps/shared          SwiftUI views, shared byte for byte between macOS and iOS
 apps/android         Jetpack Compose
 apps/ios, apps/macos thin shells around apps/shared
 apps/linux           GTK4 and libadwaita — its own cargo workspace, links the core with no FFI
+apps/windows         WinUI 3 on .NET 9 — reaches the core through the C ABI in sg-ffi/src/cabi.rs
 fixtures             docker compose sshd targets and a throwaway key
-scripts              build-{macos,ios,android}.sh, check.{sh,ps1}, release.sh, make-icons.swift
+scripts              build-{macos,ios,android,windows}.{sh,ps1}, check.{sh,ps1}, release.sh
 ```
 
-There is no `apps/windows`: the app is not written, and Windows is covered only by the CI job that
-compiles and tests the core.
+`apps/windows` is not a cargo crate at all — it is two C# projects and a WinUI app, built by
+`.\scripts\build-windows.ps1` and by the `windows:app` CI job. It reaches the core through
+`crates/sg-ffi/src/cabi.rs`, a hand-written `extern "C"` surface that moves whole view models across
+as JSON, because UniFFI has no C# backend and `uniffi-bindgen-cs` is pinned a uniffi version behind
+this workspace. `csbindgen` generates the C# declarations from those signatures; the result is
+committed and `scripts/check-bindings.ps1` fails if it goes stale.
 
 `apps/linux` is deliberately **not** a member of the root cargo workspace. The core has to keep
 building on a machine with no desktop, and a member would put `libgtk-4-dev` in the way of every

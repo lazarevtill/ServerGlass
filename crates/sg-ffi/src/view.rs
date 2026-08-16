@@ -8,7 +8,13 @@ use sg_core::{LiveStore, TargetState};
 use sg_model::{Entity, EntityId, EntityKind, SeriesDescriptor, SeriesKind, Unit};
 
 /// How to reach a host.
-#[derive(Clone, Debug, uniffi::Record)]
+///
+/// The serde derives here and on the records below serve the C ABI in [`crate::cabi`], which moves
+/// whole view models across as JSON rather than describing them to a C compiler field by field.
+/// `camelCase` because that is what UniFFI already produces for Swift and Kotlin, so one property
+/// name is right on all four platforms.
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TargetConfig {
     pub host: String,
     pub port: u16,
@@ -16,14 +22,21 @@ pub struct TargetConfig {
     /// `"agent"`, `"key"`, `"key_text"` or `"password"`.
     pub auth_kind: String,
     /// Path to a private key, when `auth_kind` is `"key"`.
+    //
+    // `default` on every optional field so an absent key and an explicit null mean the same thing.
+    // A C# serialiser configured to omit nulls would otherwise have every config rejected with
+    // "missing field", which is a contract that breaks on a setting nobody thinks of as load-bearing.
+    #[serde(default)]
     pub key_path: Option<String>,
     /// The private key itself, when `auth_kind` is `"key_text"`.
     ///
     /// How a key is given on a phone: there is no user-visible filesystem to point a path at and
     /// no ssh-agent to defer to, so the key body is pasted. Secret material, handled exactly like
     /// `secret` — kept in the platform keystore and passed here per connection.
+    #[serde(default)]
     pub key_text: Option<String>,
     /// Key passphrase or account password. Held only for the life of the connection attempt.
+    #[serde(default)]
     pub secret: Option<String>,
     /// `"strict"`, `"accept_new"` or `"accept_any"`.
     pub host_key_policy: String,
@@ -32,18 +45,31 @@ pub struct TargetConfig {
     /// A phone has no `~/.ssh` and no `HOME` in the app's environment, so "remember this server's
     /// identity" wrote nothing and every later connection was another first connection. Each app
     /// passes its own writable directory; the core does not guess.
+    #[serde(default)]
     pub known_hosts_path: Option<String>,
     pub refresh_ms: u64,
 }
 
 /// Connection lifecycle, flattened for the FFI.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+///
+/// Internally tagged for JSON, so C# reads `{"kind":"failed","message":…,"recoverable":true}`
+/// rather than serde's default nesting. A fielded enum is the one shape a hand-written C struct
+/// surface handles worst, and this is how it avoids being one.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ConnectionState {
     Idle,
     Connecting,
     Online,
-    Reconnecting { attempt: u32, retry_in_ms: u64 },
-    Failed { message: String, recoverable: bool },
+    Reconnecting {
+        attempt: u32,
+        #[serde(rename = "retryInMs")]
+        retry_in_ms: u64,
+    },
+    Failed {
+        message: String,
+        recoverable: bool,
+    },
 }
 
 impl From<&TargetState> for ConnectionState {
@@ -74,7 +100,8 @@ impl From<&TargetState> for ConnectionState {
 ///
 /// Named `MetricGauge` rather than `Gauge` because SwiftUI exports a `Gauge` view, and an
 /// ambiguous type lookup in every UI file is a worse tax than four extra characters here.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MetricGauge {
     pub series_id: String,
     pub metric: String,
@@ -99,7 +126,8 @@ pub struct MetricGauge {
 }
 
 /// A titled group of secondary metrics, shown below the headline grid.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DetailGroup {
     pub title: String,
     pub gauges: Vec<MetricGauge>,
@@ -110,7 +138,8 @@ pub struct DetailGroup {
 /// Assembled here rather than in each UI so that "Storage · 4.6% · 142 GiB free of 150 GiB" reads
 /// identically on every platform, and so the decision about *which* readings a non-technical
 /// person should see lives in one place.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SimpleTile {
     pub metric: String,
     /// "Processor", "Memory", "Storage", "Running for".
@@ -136,7 +165,8 @@ pub struct SimpleTile {
 /// Flattened rather than reusing [`EntityView`]: a host runs hundreds of processes, and shipping
 /// each one's full gauge set and sparkline history across the FFI twice a second would dominate
 /// the cost of a refresh. Only the handful worth showing crosses, already sorted.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProcessView {
     pub pid: String,
     pub command: String,
@@ -157,7 +187,8 @@ pub struct ProcessView {
 }
 
 /// A node in the entity tree.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntityView {
     pub id: String,
     pub kind: String,
@@ -167,7 +198,8 @@ pub struct EntityView {
 }
 
 /// Everything the UI needs to render one host, as of the last completed refresh.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TargetSnapshot {
     pub target_id: String,
     pub state: ConnectionState,

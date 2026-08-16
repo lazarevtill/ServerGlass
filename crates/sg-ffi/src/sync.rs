@@ -12,7 +12,8 @@ use sg_sync::{merge, Offer, Payload, Session, SyncHost};
 use tokio::net::TcpStream;
 
 /// A host as it crosses between devices — no credential, by construction.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncHostView {
     pub address: String,
     pub port: u16,
@@ -52,7 +53,8 @@ impl From<SyncHost> for SyncHostView {
 }
 
 /// A pin the two devices disagree about. Never applied; shown to the user.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PinConflictView {
     pub host: String,
     pub existing: String,
@@ -60,7 +62,8 @@ pub struct PinConflictView {
 }
 
 /// What a device is offering to send, or has received.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncBundle {
     pub hosts: Vec<SyncHostView>,
     pub known_hosts: Vec<String>,
@@ -85,7 +88,8 @@ impl From<Payload> for SyncBundle {
 }
 
 /// The result of applying a received bundle to what this device already had.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, uniffi::Record, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MergeResult {
     pub hosts: Vec<SyncHostView>,
     pub known_hosts: Vec<String>,

@@ -16,6 +16,10 @@ sg-core = { workspace = true }
 sg-sync = { workspace = true }
 sg-model = { workspace = true }
 sg-transport = { workspace = true }
+# The C ABI in `cabi.rs` moves whole view models across as JSON rather than as C structs; see the
+# module header for why. Both were already in the tree through sg-sync, so this adds no supply chain.
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

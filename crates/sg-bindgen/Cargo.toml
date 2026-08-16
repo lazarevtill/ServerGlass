@@ -11,5 +11,13 @@ publish = false
 name = "uniffi-bindgen"
 path = "src/main.rs"
 
+# The C# side. Separate from `uniffi-bindgen` because it reads `cabi.rs` rather than the UniFFI
+# scaffolding, and lives here for the same reason that one does: neither generator belongs in the
+# library that ships inside an app.
+[[bin]]
+name = "csharp-bindgen"
+path = "src/csharp.rs"
+
 [dependencies]
+csbindgen = "1.9.6"
 uniffi = { workspace = true, features = ["cli"] }

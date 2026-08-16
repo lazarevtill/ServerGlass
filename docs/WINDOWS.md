@@ -1,18 +1,17 @@
 # ServerGlass on Windows
 
-Everything needed to get a coding agent — or a person — productive on Windows, and an honest
-statement of what does and does not exist here yet.
+Everything needed to get a coding agent — or a person — productive on Windows.
 
-## Where Windows actually stands
+## Where Windows stands
 
 | | |
 |---|---|
 | **The Rust core** | Builds and passes its tests on Windows. Verified on every push by the `rust:windows` CI job. |
-| **The Windows app** | **Does not exist.** `apps/windows/` is empty. |
+| **The Windows app** | WinUI 3 on .NET 9, in `apps/windows/`. Built and tested on every push by the `windows:app` CI job. |
 
-Nothing has been faked: the half that opens SSH connections, collects, parses, derives rates,
-assesses health and produces the view models runs on Windows today. The window around it is not
-written. See [Building the Windows app](#building-the-windows-app) for what that involves.
+The app shows the same two screens as every other platform — the plain overview and the dense
+technical view — plus the command runner and device pairing. It does not scan a QR, because a
+desktop has no camera; it renders one to receive an inventory and takes a pasted code to send one.
 
 ## Setting up
 
@@ -44,27 +43,64 @@ is a hard requirement, not an optional extra.
 winget install Microsoft.VisualStudio.2022.BuildTools
 ```
 
-In the installer, select **Desktop development with C++**. `rustup` will tell you if it is missing.
+**The C++ workload is not installed by default, and Build Tools can be present without it** — which
+looks like a working install right up until `cargo build` fails with `linker link.exe not found`.
+Select **Desktop development with C++** in the installer, or add it without the UI:
 
-### 3. Git
+```powershell
+& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe" modify `
+  --installPath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools" `
+  --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --quiet --norestart
+```
+
+`setup.exe modify` has no `--wait`; passing one fails with exit code 87 and a usage dump.
+
+### 3. NASM
+
+```powershell
+winget install NASM.NASM
+```
+
+`aws-lc-sys` assembles x86-64 assembly as well as compiling C, and without NASM the build panics
+several minutes in with `NASM command not found! Build cannot continue.` — an error naming a crate
+rather than the missing tool. `scripts\check.ps1` checks for it up front.
+
+### 4. .NET, for the app only
+
+```powershell
+winget install Microsoft.DotNet.SDK.9
+```
+
+Not needed for the core. Nothing else is: the Windows App SDK arrives as a NuGet package, so there
+is no Visual Studio, no workload install and no MSIX certificate involved.
+
+### 5. Git
 
 ```powershell
 winget install Git.Git
 ```
 
-That is the whole setup. There is no Node, no Python, no Docker needed to build and test the core.
+That is the whole setup. There is no Node, no Python, and no Docker needed to build and test the
+core.
 
 ## Building and testing
 
 One command runs everything CI runs, in the same order:
 
 ```powershell
-pwsh scripts/check.ps1
+.\scripts\check.ps1          # the Rust core
+.\scripts\check.ps1 -All     # the core, plus the Windows app and its tests
 ```
 
 It checks formatting, then clippy with warnings denied, then builds, then tests — and stops at the
 first failure with the name of the step. A green run here means a green pipeline. It also tells you
-what to install if `cargo` is missing.
+what to install if anything is missing.
+
+`.\scripts\check.ps1` rather than `pwsh scripts/check.ps1`: PowerShell 7 is not on a stock Windows
+machine, and the script runs under the Windows PowerShell 5.1 that is. **The file is UTF-8 with a
+BOM on purpose** — 5.1 reads a BOM-less file as the ANSI codepage, and the em dashes then decode to
+a character it treats as a closing quote, so the script fails to parse at all. If you rewrite it,
+keep the BOM.
 
 The four steps individually, if you want to run one:
 
@@ -120,17 +156,17 @@ that impossible, and it found three separate breakages on its first two runs.
 ```powershell
 git clone https://gitlab.lazarev.cloud/lazarevtill/serverglass.git
 cd serverglass
-pwsh scripts/check.ps1
+.\scripts\check.ps1 -All
 ```
 
-If that passes, the core is built and tested and you are current. Then:
+If that passes, the core and the app are built and tested and you are current. Then:
 
 1. Read [CLAUDE.md](../CLAUDE.md) — the invariants, and the list of mistakes this project has
    already made.
 2. Read the section below for what Windows can and cannot verify.
-3. Make the change, run `pwsh scripts/check.ps1` again, push, **and check the pipeline** — the
-   Windows job is required and it has caught three real portability breakages that a local build on
-   another platform would never have shown.
+3. Make the change, run `.\scripts\check.ps1 -All` again, push, **and check the pipeline** — both
+   Windows jobs are required, and `rust:windows` has caught three real portability breakages that a
+   local build on another platform would never have shown.
 
 ## For an LLM agent working here
 
@@ -142,20 +178,25 @@ and `Remove-Item -Recurse -Force` to delete.
 
 | Runs on Windows | Needs another machine |
 |---|---|
-| `pwsh scripts/check.ps1` — fmt, clippy, build, 258 tests | `swift test` (macOS only) |
+| `.\scripts\check.ps1` — fmt, clippy, build, the core's tests | `swift test` (macOS only) |
 | The whole core: transport, collectors, scheduler, FFI, pairing | `gradle :app:testDebugUnitTest` (needs the Android SDK) |
-| Live SSH tests, with Docker Desktop + WSL | Building the macOS, iOS or Android apps |
-| The device-pairing protocol end to end (`crates/sg-sync`) | Rendering a QR or driving a camera |
+| The Windows app, its tests, and running it against a real host | Building the macOS, iOS or Android apps |
+| Live SSH tests, with Docker Desktop + WSL | Building the Linux app (needs GTK 4.10+) |
+| The device-pairing protocol end to end (`crates/sg-sync`) | Driving a camera to scan a QR |
 
 That first row is most of the project. The core is where the parsing, scheduling, rate derivation,
 health verdicts, wording and pairing live; the app layers are views over it. A Windows machine can
 work on nearly everything and verify it properly.
 
+**Do not stop at a green build.** The app has crashed on launch with everything compiling and every
+test passing — a WinUI layout cycle, which is a runtime failure by construction. Start it against
+the fixtures and look at it.
+
 Do not claim a change is verified on the Apple or Android side from a Windows machine. Say which
 platform you checked. The single most repeated mistake in this project's history is assuming the
 same code shape behaves the same way on another platform — it has not, four separate times.
 
-**Before pushing:** `pwsh scripts/check.ps1`. CI has been left red for eight commits because tests
+**Before pushing:** `.\scripts\check.ps1 -All`. CI has been left red for eight commits because tests
 passing locally says nothing about `fmt` and `clippy`, and the script exists so that is one command
 rather than four to remember.
 
@@ -164,36 +205,88 @@ rather than four to remember.
 the *remote* shell — always POSIX `sh` on the monitored Linux host — regardless of what you are
 developing on.
 
-## The CI job
+## The CI jobs
 
-`.gitlab-ci.yml`, job `rust:windows`:
+Both run on the `windows` shell runner rather than a container, which also means they keep working
+while the image registry is unavailable; both install their own toolchain on first run, because a
+shell runner starts with whatever the machine happens to have; and neither is `allow_failure`, since
+a job that is allowed to fail is a job nobody reads.
 
-- Runs on the `windows` shell runner rather than a container, which also means it keeps working
-  while the image registry is unavailable.
-- Installs its own toolchain on first run, because a shell runner starts with whatever the machine
-  happens to have.
-- Caches `.cargo/registry`, `.rustup/toolchains` and `target/` against `Cargo.lock`.
-- Is **required**. It is not `allow_failure` — a job that is allowed to fail is a job nobody reads.
+`rust:windows` builds and tests the core. It is the portability guard, and it is kept narrow and
+fast on purpose.
 
-## Building the Windows app
+`windows:app` builds the app. It additionally installs the .NET SDK into the project directory, and
+it checks one thing the core's job cannot: that the committed C# bindings still match the Rust they
+were generated from. Generated code that is allowed to go stale is a crash at runtime and nothing at
+build time, so `scripts\check-bindings.ps1` regenerates into place and fails if anything moved.
 
-Not started. The design is fixed and the FFI surface it binds to is stable, so this is
-implementation rather than exploration:
+They are split so the failure is legible: a red `rust:windows` means the core broke on a platform
+nobody develops on, a red `windows:app` means the app did.
 
-1. **C# bindings.** `uniffi-bindgen-cs` is third-party and young; the documented fallback is
-   hand-written `extern "C"` plus `csbindgen`. Evaluate the former, expect to need the latter.
-   The Rust side already exports a `cdylib` — see `crates/sg-ffi/Cargo.toml`.
-2. **A WinUI 3 project** under `apps/windows/`, consuming those bindings.
-3. **The views**, which must match what the other platforms show — same panels, same order, same
-   widget rules. [docs/DESIGN.md](DESIGN.md) is the spec and
-   `apps/shared/ServerGlassUI/HostDetailView.swift` is the reference implementation; the Android
-   `Technical.kt` is a worked example of matching it exactly on a second toolkit.
-4. **Storage.** The Apple apps use the Keychain and Android uses the Keystore, both wrapped by a
-   small platform-specific store. Windows should use DPAPI or the Credential Manager the same way.
-   Secrets never go in the host record — see `HostStore` on either platform.
+## The Windows app
 
-The one thing not to do is invent behaviour. Every threshold, unit, verdict and piece of wording is
-already in `crates/sg-ffi`; a Windows view layer maps a level onto a colour and lays things out.
+```
+apps/windows/
+  ServerGlass.Core/        the bridge to Rust: P/Invoke, the view models, the stores
+  ServerGlass.Core.Tests/  its tests, including ones that call the real sg_ffi.dll
+  ServerGlass/             WinUI 3 on .NET 9, unpackaged
+```
+
+Build and run it:
+
+```powershell
+.\scripts\build-windows.ps1                    # debug
+.\scripts\build-windows.ps1 -Release -Publish  # a folder you can copy anywhere
+```
+
+`WindowsPackageType=None` and `WindowsAppSDKSelfContained=true`, so it runs from a folder with no
+MSIX identity, no signing certificate and no separately-installed runtime. That is also what makes
+it buildable on a CI runner that has nothing but an SDK.
+
+### How it reaches the core
+
+Not through UniFFI. UniFFI has no C# backend, and `uniffi-bindgen-cs` — the third-party generator
+this document used to say to evaluate — is a version behind: its latest release targets uniffi
+0.31 while this workspace is on 0.32, and with no `.udl` in the tree there is no non-library mode
+to fall back on. So the documented fallback is what ships: a hand-written `extern "C"` surface in
+`crates/sg-ffi/src/cabi.rs`, with `csbindgen` generating the C# declarations from those signatures.
+
+The payload crosses as **UTF-8 JSON in an `{ok|err}` envelope**, not as `#[repr(C)]` structs. A
+`TargetSnapshot` nests vectors of records inside vectors of records, an `Option<f64>` and a fielded
+enum; describing that layout by hand in two languages and keeping the copies in step is the failure
+mode this project already has a list entry for. With JSON there is nothing to keep in step, and the
+contract is testable rather than merely agreed-by-inspection —
+`field_set_is_asserted_so_a_new_field_fails_here` pins the exact key set, the same guard
+`crates/sg-sync` puts on the pairing wire format.
+
+The generated `NativeMethods.g.cs` is committed, exactly as the Swift bindings are, so a checkout
+builds without running a generator first. `scripts\check-bindings.ps1` proves it is current.
+
+### What the app layer is allowed to decide
+
+Colour from a level string, and layout. That is all — the same rule as every other front-end.
+`sg_format`, `sg_format_duration` and `sg_sparkline_points` are exported precisely so this layer
+cannot re-derive a number, a unit or a chart's scale. Two of those were found the hard way here:
+uptime rendered as `11324 s` where the phone says `3h 8m`, because the Apple and Android layers
+special-case `metric == "uptime"` and this one initially did not.
+
+### Storage
+
+`HostStore` keeps the host records as JSON under `%LOCALAPPDATA%\ServerGlass`, and the secrets —
+passwords, key passphrases and pasted private keys — under **DPAPI**, scoped to the current user.
+`SavedHost` has no field for a secret, which is the point: it cannot reach disk in the clear by
+accident.
+
+DPAPI rather than the Credential Manager, which is the closer analogue to the Keychain and was the
+first implementation: `CredWriteW` caps a credential blob at 2560 bytes, and a pasted private key —
+the whole reason the `key_text` sign-in method exists — is larger than that for anything but a short
+ed25519 key. It failed for exactly the secret the store exists to hold. A test covers a
+multi-kilobyte key so that cannot come back.
+
+### What it does not do
+
+It cannot scan a QR: a desktop has no camera. It renders one to receive an inventory, and takes a
+pasted pairing code to send one. Nothing else from the other platforms is missing.
 
 
 ## The fixtures will not start: reserved port ranges
