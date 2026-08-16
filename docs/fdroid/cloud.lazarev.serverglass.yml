@@ -8,17 +8,26 @@
 # need adjusting are the Rust install location and the NDK, because their image decides both.
 
 Categories:
-  - Internet
+  # "Control desktops, servers, and devices remotely via RDP, VNC, or SSH" — F-Droid's own wording
+  # for this category, and the closest thing to a description of the app. Both are checked against
+  # fdroiddata's config/categories.yml, which is far more granular than it used to be: the obvious
+  # first guesses, Internet and System, are still valid but say almost nothing.
+  - Remote Access
   - System
-License: MIT OR Apache-2.0
+# The project is dual-licensed MIT OR Apache-2.0, but this field is an exact match against
+# F-Droid's approved-tag list rather than an SPDX expression parser, so it cannot say so. Apache-2.0
+# is the half named here because it carries the patent grant; the repository still offers both, and
+# `fdroid lint` rejects the dual string outright.
+License: Apache-2.0
 AuthorName: Till Lazarev
 AuthorEmail: lazarevtill@lazarev.cloud
 SourceCode: https://github.com/lazarevtill/ServerGlass
 IssueTracker: https://github.com/lazarevtill/ServerGlass/issues
 # The per-version changelogs themselves, rather than the GitHub releases page: releases are
 # published on the canonical GitLab, so the mirror's releases page is empty and would be a dead
-# end for anyone who clicked it from the F-Droid listing.
-Changelog: https://github.com/lazarevtill/ServerGlass/tree/main/fastlane/metadata/android/en-US/changelogs
+# end for anyone who clicked it from the F-Droid listing. /HEAD rather than /main because `fdroid
+# lint` asks for it — it keeps working if the default branch is ever renamed.
+Changelog: https://github.com/lazarevtill/ServerGlass/tree/HEAD/fastlane/metadata/android/en-US/changelogs
 
 AutoName: ServerGlass
 Description: |-

@@ -12,7 +12,7 @@ What is ready, what still has to be done by hand, and what would get the submiss
 | No prebuilt binaries or blobs in the repo | Verified: `git ls-files` matches no `.so`, `.jar`, `.aar` or `.apk` |
 | A git tag per release, matching the version | `v0.4.0` = versionName 0.4.0, versionCode 6 |
 | `fastlane/metadata/android/en-US/` | Title, both descriptions, icon, three phone screenshots, changelogs |
-| Build recipe | [`docs/fdroid/cloud.lazarev.serverglass.yml`](fdroid/cloud.lazarev.serverglass.yml) — dry-run locally, not yet through `fdroid build` |
+| Build recipe | [`docs/fdroid/cloud.lazarev.serverglass.yml`](fdroid/cloud.lazarev.serverglass.yml) — passes `fdroid lint`, dry-run locally, not yet through `fdroid build` |
 
 ### Why the recipe targets v0.4.0 and not v0.3.0
 
@@ -73,12 +73,51 @@ had two, long after anyone was looking at it.
 **`-P 26` must keep matching `minSdk`** in `apps/android/app/build.gradle.kts`. The NDK links
 against that API level's libc, and a mismatch is a runtime loader failure rather than a build error.
 
+## What `fdroid lint` caught, and what it takes to run it
+
+`pip install fdroidserver` is enough to lint the recipe without a buildserver, and it is worth doing
+before every submission — it found three real problems in a recipe that read perfectly well:
+
+- **`License: MIT OR Apache-2.0` was rejected.** That field is an exact match against F-Droid's
+  approved-tag list, not an SPDX expression parser, so a dual licence cannot be expressed. The
+  recipe now says `Apache-2.0`, the half carrying the patent grant. **The repository still offers
+  both** — this narrows only what the F-Droid listing displays. Switch it to `MIT` if you would
+  rather that were the one shown.
+- **`Categories: [Internet, System]` said almost nothing.** Both are still valid, but the list is
+  far more granular than it used to be, and one entry describes this app almost exactly: **Remote
+  Access** — "Control desktops, servers, and devices remotely via RDP, VNC, or SSH".
+- **The changelog URL used `/main`.** Lint asks for `/HEAD`, which keeps working if the default
+  branch is ever renamed.
+
+Linting needs fdroiddata's own `config/categories.yml`; without it every category is reported
+invalid, which is a false alarm rather than a finding:
+
+```bash
+python3 -m venv /tmp/fd && /tmp/fd/bin/pip install fdroidserver
+mkdir -p /tmp/fdroiddata/{metadata,config} && cd /tmp/fdroiddata
+printf 'repo_url: https://example.com/fdroid/repo\nrepo_name: t\nrepo_description: t\n' > config.yml
+curl -sS https://gitlab.com/fdroid/fdroiddata/-/raw/master/config/categories.yml \
+    | grep -v '^  icon:' > config/categories.yml     # the icons it names are not in this checkout
+cp /path/to/serverglass/docs/fdroid/cloud.lazarev.serverglass.yml metadata/
+/tmp/fd/bin/fdroid lint cloud.lazarev.serverglass    # silence is a pass
+```
+
 ## Submitting
 
+The copy in this repository is commented, because the reasoning behind the Rust install location
+and the `--bin` flag is worth keeping next to the lines it explains. **fdroiddata's copy is not**:
+`fdroid rewritemeta` normalises field order and strips every comment, and maintainers expect a file
+that is already normalised. So the last step before opening the merge request is to run it — it
+changes formatting only, and the semantics have been checked to survive it.
+
 1. Fork <https://gitlab.com/fdroid/fdroiddata>.
-2. Add `metadata/cloud.lazarev.serverglass.yml`.
-3. Open a merge request with the **New App** label.
-4. Expect 24–48 hours from approval to the app appearing, once builds succeed.
+2. `cp docs/fdroid/cloud.lazarev.serverglass.yml <fork>/metadata/`
+3. `fdroid rewritemeta cloud.lazarev.serverglass`, then `fdroid lint cloud.lazarev.serverglass`.
+4. Open a merge request with the **New App** label.
+5. Expect 24–48 hours from approval to the app appearing, once builds succeed.
+
+Do not edit fdroiddata's copy by hand afterwards. This repository's file stays the source; anything
+learned from a review belongs back in it, or the next release loses the fix.
 
 ## Keeping it updated
 
