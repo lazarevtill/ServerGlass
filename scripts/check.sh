@@ -32,6 +32,12 @@ elif [[ -n "${SG_REQUIRE_LINUX_APP:-}" ]]; then
 else
     printf '\n==> linux app: SKIPPED, no GTK 4 development packages\n'
     printf '    Install them (see scripts/build-linux.sh) or set SG_REQUIRE_LINUX_APP=1 to fail here.\n'
+    # One thing is still checked without a toolkit: that apps/linux/Cargo.lock is not stale.
+    # It is a separate lockfile over the same crates, so adding a dependency to sg-ffi leaves it
+    # behind, and `linux:app` then fails on `--locked` — several pipelines after the change, since
+    # nothing a developer without GTK runs would have noticed. Resolving needs no GTK at all.
+    step "linux app lockfile"
+    cargo metadata --locked --manifest-path apps/linux/Cargo.toml --format-version 1 >/dev/null
 fi
 
 if [[ "${1:-}" == "--all" ]]; then

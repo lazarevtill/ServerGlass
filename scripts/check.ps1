@@ -66,6 +66,14 @@ Step "clippy"  { cargo clippy --workspace --all-targets --locked -- -D warnings 
 Step "build"   { cargo build --workspace --locked }
 Step "test"    { cargo test --workspace --locked }
 
+# The Linux app cannot be built here, but its lockfile can still be checked, and that is the part
+# a Windows machine gets wrong. apps/linux is a separate cargo workspace over the same crates, so
+# adding a dependency to sg-ffi leaves its Cargo.lock behind and the `linux:app` job fails on
+# `--locked` — which is exactly how it went red for four pipelines. Resolving needs no GTK.
+Step "linux app lockfile" {
+    cargo metadata --locked --manifest-path (Join-Path $PSScriptRoot '..\apps\linux\Cargo.toml') --format-version 1 | Out-Null
+}
+
 if ($All) {
     Need 'dotnet' 'The Windows app needs the .NET SDK:' 'winget install Microsoft.DotNet.SDK.9'
 

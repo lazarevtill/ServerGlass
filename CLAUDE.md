@@ -129,6 +129,10 @@ Every one of these shipped, and every one was found by using the app rather than
   special-case that one metric and the third front-end did not know to.
 - **A green build is not a running app.** The WinUI app crashed on launch — a layout cycle, which
   is a runtime failure by construction — with every test passing and no compiler warning.
+- **A second lockfile goes stale in silence.** `apps/linux` has its own `Cargo.lock` over the same
+  crates, so a dependency added to `sg-ffi` leaves it behind and `linux:app` fails on `--locked`.
+  Nobody without GTK runs anything that would notice, so it stayed red for four pipelines. Both
+  check scripts now resolve that lockfile, which needs no toolkit.
 - **A running app is not a shippable one.** `dotnet publish` silently omitted the compiled XAML and
   its resource index, which `dotnet build` writes, so the Windows app ran from `bin` and crashed in
   its own constructor once installed. Nothing before the installer touches the publish path, so
