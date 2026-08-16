@@ -3,10 +3,11 @@
 #   .\scripts\check.ps1            the Rust core
 #   .\scripts\check.ps1 -All       the core, plus the Windows app and its tests
 #
-# The first form is the same four steps `rust:windows`, `rust:fmt`, `rust:clippy` and `rust:test`
-# run, in the same order, so a green run here means a green pipeline. It exists because "the tests
-# pass" says nothing about fmt and clippy, and this repository has been left red for eight commits
-# over exactly that.
+# The first form is what `rust:windows`, `rust:fmt`, `rust:clippy` and `rust:test` run, in the same
+# order, followed by the two things a machine with no GTK and no Xcode can still check on their
+# behalf: that every generator call names its binary, and that the Linux app's separate lockfile is
+# not stale. It exists because "the tests pass" says nothing about fmt and clippy, and this
+# repository has been left red for eight commits over exactly that.
 #
 # The macOS, iOS and Android apps need their own toolchains — see docs/WINDOWS.md.
 #

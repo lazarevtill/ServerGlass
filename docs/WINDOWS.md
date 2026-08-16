@@ -225,6 +225,18 @@ cannot be run on a release branch.
 They are split so the failure is legible: a red `rust:windows` means the core broke on a platform
 nobody develops on, a red `windows:app` means the app did.
 
+Both share one runner and therefore one build directory, and that has one sharp edge worth knowing
+before it bites: a job begins with `git clean -ffdx`, and on Windows a file another process still
+holds open cannot be deleted. `dotnet build` leaves MSBuild workers alive for minutes, so a job
+starting moments after the app job died inside `get_sources` — before a line of its script — with
+`failed to remove .dotnet\dotnet.exe: Invalid argument`. Because it only happened when two jobs ran
+back to back, it read as flakiness rather than as something one job did to the next.
+
+Both jobs now exclude the cached toolchains from the clean (`GIT_CLEAN_FLAGS`), and `windows:app`
+turns off MSBuild's node reuse and shuts the build servers down in `after_script`, so it leaves
+nothing holding a handle. If a Windows job ever fails in seconds with an empty-looking log, read the
+`get_sources` section rather than the script.
+
 ## The Windows app
 
 ```
