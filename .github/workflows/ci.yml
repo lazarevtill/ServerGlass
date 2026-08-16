@@ -124,7 +124,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      # Pinned, and installed by the action rather than taken from the runner image. There is no
+      # gradle-wrapper.jar in this repository on purpose — it is a committed binary, which is the
+      # one thing an F-Droid submission must not contain — so without this the build would run on
+      # whatever Gradle the image happened to ship that week. 9.7.0 is what the local build and the
+      # clean-clone dry run both used against AGP 8.9.0.
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.7.0"
       - name: Install Rust and the Android target
         run: |
           rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
