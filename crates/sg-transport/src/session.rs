@@ -431,7 +431,9 @@ async fn authenticate(handle: &mut Handle<ClientHandler>, spec: &ConnectionSpec)
             }
             #[cfg(windows)]
             {
-                let agent = AgentClient::connect_pageant().await;
+                let agent = AgentClient::connect_pageant()
+                    .await
+                    .map_err(|e| TransportError::NoAgent(e.to_string()))?;
                 return authenticate_with_agent(handle, spec, agent).await;
             }
             #[cfg(not(any(unix, windows)))]
