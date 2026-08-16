@@ -11,6 +11,16 @@ Every other number is one tap away.
 
 ---
 
+![ServerGlass on macOS](docs/images/macos-readings.png)
+
+<p align="center">
+  <img src="docs/images/android-simple.png" width="30%" alt="The summary on Android">
+  <img src="docs/images/android-readings.png" width="30%" alt="Every reading on Android">
+  <img src="docs/images/android-command.png" width="30%" alt="Running a command">
+</p>
+
+New here? [The guide](docs/GUIDE.md) walks through every flow with pictures.
+
 ## Status
 
 | Platform | State |
@@ -297,4 +307,5 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
 
 ## Licence
 
-MIT OR Apache-2.0.
+MIT or Apache-2.0, at your option — see [LICENSE-MIT](LICENSE-MIT) and
+[LICENSE-APACHE](LICENSE-APACHE).
