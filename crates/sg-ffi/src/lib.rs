@@ -14,6 +14,7 @@
 //! need one — a terminal cannot be polled.
 
 pub mod plain;
+mod sync;
 mod view;
 
 use std::collections::HashMap;

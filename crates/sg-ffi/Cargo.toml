@@ -13,6 +13,7 @@ name = "sg_ffi"
 
 [dependencies]
 sg-core = { workspace = true }
+sg-sync = { workspace = true }
 sg-model = { workspace = true }
 sg-transport = { workspace = true }
 thiserror = { workspace = true }

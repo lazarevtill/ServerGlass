@@ -1,6 +1,7 @@
 # Syncing across devices
 
-Research and a recommendation. Nothing here is implemented yet.
+Research, a recommendation, and — for Stage 1 — the protocol as built. `crates/sg-sync` implements
+the pairing handshake, the transfer and the merge rules; the app screens are not written yet.
 
 The question — "sync my servers across my devices" — hides four separate decisions with opposite
 risk profiles. Treating them as one is how sync features become the weakest part of an application.
@@ -236,6 +237,26 @@ screenshot of a QR is as good as the original, and it outlives the moment.
 
 Put the **receiving device's public key** in the QR instead. Then anyone who photographs it, films
 it, or shoulder-surfs it learns a public key, which is worth nothing.
+
+### Over a VPN
+
+A device usually has more than one address, and which one the *other* device can reach depends on
+where it is. A phone on Wi-Fi with WireGuard or Tailscale up has at least two, and over a tunnel the
+tunnel address is often the only one that reaches. So the QR carries **every** address the device
+might answer at, and the scanner tries them in order until one connects — an extra costs a failed
+connection attempt, a missing one costs the whole pairing.
+
+Two details this forces:
+
+- Addresses are comma-separated in the code, not colon-separated, because an IPv6 literal is full of
+  colons and a VPN handing out v6 would otherwise break the parse. IPv6 literals are bracketed
+  before the port is appended.
+- Each attempt has its own short timeout. A wrong address on a LAN refuses immediately, but a routed
+  yet unreachable VPN address hangs until the OS gives up — which would strand the user on a spinner
+  while a working address went untried.
+
+The listener binds `0.0.0.0`, so it is reachable on every interface regardless; the advertised list
+only decides what the other device is told to dial.
 
 ### The exchange
 
