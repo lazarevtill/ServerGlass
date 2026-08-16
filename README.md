@@ -1,9 +1,18 @@
 # ServerGlass
 
-Agentless server monitoring for macOS, iOS, iPadOS and Android.
+Agentless server monitoring for macOS, iOS, iPadOS, Android and Linux.
+
+[![CI](https://github.com/lazarevtill/ServerGlass/actions/workflows/ci.yml/badge.svg)](https://github.com/lazarevtill/ServerGlass/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#licence)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20iOS%20%7C%20Android%20%7C%20Linux-lightgrey.svg)
 
 Nothing is installed on the servers you monitor. ServerGlass opens one SSH connection, reads
 `/proc` and `/sys`, and renders it — so any box you can already SSH into is already monitorable.
+
+However many collectors are enabled, a refresh costs **exactly one network round trip** — there is
+a test that fails if that ever stops being true. No agent, no package, no config file, no temp
+file, and no sample ever written to disk.
 
 The default screen is written for someone who does not know what SSH is: a plain-language verdict,
 three readings that mean something without training, and the names of whatever is working hardest.
