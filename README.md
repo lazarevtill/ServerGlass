@@ -306,20 +306,24 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
 - WebAssembly plugin SDK (WIT + wasmtime); plugins are pure functions that request data and never
   perform I/O
 - `Sink` exporters, for handing live samples to an external metrics and alerting system
-- Windows 11 and Linux front-ends
+- A Windows 11 front-end (WinUI 3)
 
 **Known gaps**
 
 - Setup still assumes someone who knows what a hostname and an SSH key are. The *reading*
   experience is written for a non-technical person; the *adding* experience is not yet.
-- CI runs the Rust suite on Linux and on Windows. The Swift and Kotlin tests exist and pass
-  locally, but no macOS or Android runner is configured to run them.
-- Windows and Linux have no front-end yet. The core is built and tested on Windows in CI, so the
-  half that does the work is known to run there; the window around it is not written.
+- CI runs the Rust suite on Linux and on Windows, and builds and tests the Linux app. The Swift
+  and Kotlin tests exist and pass locally, but no macOS or Android runner is configured to run
+  them.
+- Windows has no front-end yet. The core is built and tested on Windows in CI, so the half that
+  does the work is known to run there; the window around it is not written.
+- The Linux app keeps a password or key passphrase in memory for the run rather than in the Secret
+  Service. Nothing is written to disk and the app says so plainly, but it does not yet remember a
+  password between launches the way the Keychain and the Android Keystore do.
 - Sensor parsing is covered by tests against captured `hwmon` layouts, but no machine available
   here exposes hwmon chips, so the sweep has not been run against real sensor hardware.
-- CI builds and tests the Rust core only. No macOS or Android runner is configured, so the apps
-  are built locally.
+- CI builds and tests the Rust core and the Linux app. No macOS or Android runner is configured,
+  so those apps are built locally.
 
 ## Licence
 

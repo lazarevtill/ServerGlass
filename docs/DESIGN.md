@@ -104,20 +104,23 @@ A foldable is not "sometimes a wide screen". Three things change independently:
 The activity also survives folding (`configChanges` in the manifest). Without it the SSH
 connection is torn down and every chart restarts from empty mid-gesture.
 
-## One design, four platforms
+## One design, every platform
 
 The palette, thresholds, wording, number formatting and health verdicts all come from Rust. Android
-draws its rings and sparklines with Compose `Canvas` rather than approximating the Apple ones,
-because someone moving between their phone and their desk should not have to relearn the
-dashboard.
+draws its rings and sparklines with Compose `Canvas`, and Linux draws them with Cairo, rather than
+either approximating the Apple ones — because someone moving between their phone and their desk
+should not have to relearn the dashboard.
 
 What differs per platform is only what should:
 
-| | macOS | iPhone | iPad | Android |
-|---|---|---|---|---|
-| Navigation | sidebar + detail | navigation stack | split view | one or two panes by width |
-| Add-host file picker | `NSOpenPanel` | path field | path field | path field |
-| Fold handling | — | — | — | hinge-aware split |
+| | macOS | iPhone | iPad | Android | Linux |
+|---|---|---|---|---|---|
+| Navigation | sidebar + detail | navigation stack | split view | one or two panes by width | sidebar + detail |
+| Add-host file picker | `NSOpenPanel` | path field | path field | path field | `GtkFileDialog` |
+| Fold handling | — | — | — | hinge-aware split | — |
+
+Linux is the one front-end that gets the rules by linking the core rather than through generated
+bindings, so the palette and thresholds are not merely *shared* with it — they are the same call.
 
 ## Density is earned, not assumed
 

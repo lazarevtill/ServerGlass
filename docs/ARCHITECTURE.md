@@ -166,7 +166,7 @@ The core is a state machine; UIs send commands and render snapshots.
 
 Each target runs a background task that ticks on its own interval and publishes a finished
 `TargetSnapshot`. The UI polls it on a display timer. At a one-second refresh this is
-indistinguishable from a push stream, needs no callback interface on four platforms, and cannot
+indistinguishable from a push stream, needs no callback interface on any platform, and cannot
 deadlock the tick loop behind a slow UI thread. A push-based event stream is the natural next step
 once the terminal lands — a terminal cannot be polled.
 
@@ -177,7 +177,7 @@ appear a refresh later and shove every other tile sideways.
 View models are built in Rust, not in Swift or Kotlin. A gauge arrives already knowing its label,
 bounds, unit suffix and sparkline; `format_value` and the health verdicts live in the core. This is
 what keeps the "core owns all logic" invariant from eroding one convenience method at a time across
-four codebases.
+every front-end.
 
 ### Bindings per platform
 
@@ -207,7 +207,7 @@ field is now `detail`. That defect was invisible with only Swift.
   end-to-end tests assert a refresh spends exactly one however many collectors are enabled. The
   running app displays the same counter, so the claim is observable rather than merely asserted.
 - **The FFI layer** is driven exactly as a UI drives it — add target, start, poll snapshots —
-  because it is the layer all four apps sit on.
+  because it is the layer every app sits on.
 - **Fixtures are required, not optional**, under `SG_REQUIRE_FIXTURES=1`. A skipped test reports as
   `ok`; this is how a suite quietly stops testing anything, and it happened once already when a
   fixture container died on a missing `/run/sshd`.
