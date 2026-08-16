@@ -58,6 +58,9 @@ Built installers for each tagged version are on the
   to Google Play, so your browser or file manager will ask you to allow the install.
 - **iOS** — no `.ipa`, because distributing one needs an Apple Developer signing identity. Build it
   from source with `scripts/build-ios.sh`.
+- **Linux** — build it with `scripts/build-linux.sh --install`, which puts it under `~/.local`
+  and needs no root. GTK 4.10 and libadwaita 1.4 are the floor, so Ubuntu 24.04, Debian trixie and
+  Fedora 39 onwards are fine; Debian bookworm's GTK is too old.
 
 ## Why this exists
 

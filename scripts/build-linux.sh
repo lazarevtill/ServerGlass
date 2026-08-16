@@ -15,6 +15,10 @@
 #   Debian/Ubuntu   sudo apt install libgtk-4-dev libadwaita-1-dev build-essential
 #   Fedora          sudo dnf install gtk4-devel libadwaita-devel gcc
 #   Arch            sudo pacman -S gtk4 libadwaita base-devel
+#
+# **GTK 4.10 and libadwaita 1.4 are the floor.** Debian bookworm ships 4.8 and 1.2 and cannot
+# build this: AdwToolbarView, AdwNavigationSplitView, AdwSpinRow and GtkFileDialog all arrived
+# afterwards. Ubuntu 24.04, Debian trixie, Fedora 39 and any rolling distribution are fine.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
