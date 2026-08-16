@@ -50,6 +50,37 @@ if grep -rn 'cargo run.*sg-bindgen' scripts/build-*.sh scripts/build-*.ps1 | gre
     exit 1
 fi
 
+# The version lives in five places and F-Droid rejects a release whose tag, manifest and recipe
+# disagree — the kind of failure that arrives days later as a rejected merge request rather than as
+# a build error here. It also insists a versionCode is never reused and that a changelog exists for
+# each one, so both are checked while we are counting.
+step "versions agree"
+{
+    gradle_file=apps/android/app/build.gradle.kts
+    recipe=docs/fdroid/cloud.lazarev.serverglass.yml
+    vn=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' "$gradle_file")
+    vc=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' "$gradle_file")
+    fail=0
+    check_version() {
+        [[ "$2" == "$vn" ]] || { echo "  $1 says $2, $gradle_file says $vn" >&2; fail=1; }
+    }
+    check_version Cargo.toml            "$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+    check_version apps/linux/Cargo.toml "$(sed -n 's/^version = "\(.*\)"/\1/p' apps/linux/Cargo.toml | head -1)"
+    grep -q "versionName: $vn" "$recipe" || { echo "  $recipe does not build versionName $vn" >&2; fail=1; }
+    grep -q "versionCode: $vc" "$recipe" || { echo "  $recipe does not build versionCode $vc" >&2; fail=1; }
+    grep -q "commit: v$vn"     "$recipe" || { echo "  $recipe does not pin the tag v$vn" >&2; fail=1; }
+    changelog=fastlane/metadata/android/en-US/changelogs/$vc.txt
+    if [[ ! -f $changelog ]]; then
+        echo "  $changelog is missing: F-Droid needs one per versionCode" >&2
+        fail=1
+    elif [[ $(wc -m < "$changelog") -gt 500 ]]; then
+        # Silently truncated past 500, so the end of the note simply vanishes from the listing.
+        echo "  $changelog is $(wc -m < "$changelog") characters; F-Droid truncates past 500" >&2
+        fail=1
+    fi
+    [[ $fail -eq 0 ]] || exit 1
+}
+
 if [[ "${1:-}" == "--all" ]]; then
     # No runner exists for these, so nothing but a developer checks them.
     step "swift";  swift test --package-path apps

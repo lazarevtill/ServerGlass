@@ -96,6 +96,24 @@ jobs:
       # just built. A release app around a debug core would still pass and still be incoherent.
       - run: dotnet test apps/windows/ServerGlass.Core.Tests/ServerGlass.Core.Tests.csproj -c Debug --nologo "-p:SgFfiDll=${{ github.workspace }}/target/debug/sg_ffi.dll"
       - run: dotnet build apps/windows/ServerGlass/ServerGlass.csproj -c Debug --nologo "-p:SgFfiDll=${{ github.workspace }}/target/debug/sg_ffi.dll"
+      # Every PowerShell script in the tree, parsed. Nothing else here runs them — check.ps1 and the
+      # packaging scripts are for a developer at a Windows machine — so a syntax error in one would
+      # reach that developer rather than this pipeline, and the machines that could have caught it
+      # are the ones nobody develops on. Parsing needs no toolchain and takes no time.
+      - name: Parse the PowerShell scripts
+        shell: pwsh
+        run: |
+          $bad = $false
+          Get-ChildItem scripts/*.ps1 | ForEach-Object {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) {
+              $bad = $true
+              Write-Host "$($_.Name):"
+              $errors | ForEach-Object { Write-Host "  $($_.Extent.StartLineNumber): $($_.Message)" }
+            }
+          }
+          if ($bad) { exit 1 }
 
   android:
     name: Android app (the F-Droid build path)

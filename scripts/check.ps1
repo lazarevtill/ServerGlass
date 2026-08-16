@@ -89,6 +89,47 @@ Step "linux app lockfile" {
     cargo metadata --locked --manifest-path (Join-Path $PSScriptRoot '..\apps\linux\Cargo.toml') --format-version 1 | Out-Null
 }
 
+# The version lives in five places, and F-Droid rejects a release whose tag, manifest and recipe
+# disagree — a failure that arrives days later as a rejected merge request rather than as an error
+# here. It also refuses a reused versionCode and wants a changelog for each one, so both are
+# checked while we are counting. None of this needs a toolchain, so it runs on Windows too.
+Step "versions agree" {
+    $root = Join-Path $PSScriptRoot '..'
+    $gradleFile = Join-Path $root 'apps\android\app\build.gradle.kts'
+    $gradle = Get-Content $gradleFile -Raw
+    $vn = [regex]::Match($gradle, 'versionName = "([^"]+)"').Groups[1].Value
+    $vc = [regex]::Match($gradle, 'versionCode = (\d+)').Groups[1].Value
+    $recipeFile = Join-Path $root 'docs\fdroid\cloud.lazarev.serverglass.yml'
+    $recipe = Get-Content $recipeFile -Raw
+    $problems = @()
+
+    foreach ($manifest in 'Cargo.toml', 'apps\linux\Cargo.toml') {
+        $found = [regex]::Match((Get-Content (Join-Path $root $manifest) -Raw), '(?m)^version = "([^"]+)"').Groups[1].Value
+        if ($found -ne $vn) { $problems += "$manifest says $found, build.gradle.kts says $vn" }
+    }
+    if ($recipe -notmatch "versionName: $vn") { $problems += "the F-Droid recipe does not build versionName $vn" }
+    if ($recipe -notmatch "versionCode: $vc") { $problems += "the F-Droid recipe does not build versionCode $vc" }
+    if ($recipe -notmatch "commit: v$vn")     { $problems += "the F-Droid recipe does not pin the tag v$vn" }
+
+    $changelog = Join-Path $root "fastlane\metadata\android\en-US\changelogs\$vc.txt"
+    if (-not (Test-Path $changelog)) {
+        $problems += "changelogs\$vc.txt is missing: F-Droid needs one per versionCode"
+    } else {
+        # Silently truncated past 500, so the end of the note simply vanishes from the listing.
+        # The CR of a CRLF checkout is stripped first: counting it would make the same file measure
+        # differently here than it does under check.sh, and a limit that moves with the platform is
+        # worse than no limit.
+        $length = ((Get-Content $changelog -Raw) -replace "`r", '').Length
+        if ($length -gt 500) { $problems += "changelogs\$vc.txt is $length characters; F-Droid truncates past 500" }
+    }
+
+    if ($problems) {
+        $problems | ForEach-Object { Write-Host "  $_" }
+        Write-Host "the version must agree everywhere before a release is tagged" -ForegroundColor Red
+        exit 1
+    }
+}
+
 if ($All) {
     Need 'dotnet' 'The Windows app needs the .NET SDK:' 'winget install Microsoft.DotNet.SDK.9'
 
