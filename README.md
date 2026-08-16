@@ -34,15 +34,15 @@ New here? [The guide](docs/GUIDE.md) walks through every flow with pictures.
 All of them share one Rust core: the collectors, the scheduler, the rate maths, the health
 verdicts, the wording and the number formatting are written once.
 
-**236 Rust tests**, including live runs against Debian and Alpine SSH fixtures and a regression
+**258 Rust tests**, including live runs against Debian and Alpine SSH fixtures and a regression
 test asserting that a full refresh costs exactly one network round trip — plus **7 Swift** and
 **7 Kotlin** tests over the parts those layers own: how a host is stored, what stays out of the
 record, and what an unreadable file costs.
 
 ```bash
-cargo test --workspace          # core
-swift test --package-path apps  # Apple storage and vault
-(cd apps/android && gradle :app:testDebugUnitTest)
+./scripts/check.sh        # fmt, clippy, build, test — everything CI runs
+./scripts/check.sh --all  # plus the Swift and Kotlin suites, which CI has no runner for
+pwsh scripts/check.ps1    # the same, on Windows
 ```
 
 ## Install
@@ -240,7 +240,7 @@ Working on this — as a person or as an agent — starts with three files:
 | [CLAUDE.md](CLAUDE.md) | The invariants, the traps, and how to verify a change. Read before editing. |
 | [AGENTS.md](AGENTS.md) | The same, for whichever agent tool is driving. |
 | [docs/WINDOWS.md](docs/WINDOWS.md) | Setup and the platform traps for Windows, where the core builds and the app does not exist yet. |
-| [docs/SYNC.md](docs/SYNC.md) | Research and a staged plan for syncing across devices. Not implemented. |
+| [docs/SYNC.md](docs/SYNC.md) | How devices pair and transfer, and why credentials are not part of it. |
 
 `fixtures/up.sh` verifies each published port actually reaches the distribution it should. That
 check is not ceremony: container runtimes that proxy published ports can keep a stale forward

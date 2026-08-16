@@ -304,6 +304,66 @@ void uniffi_sg_ffi_fn_method_serverglass_stop(uint64_t ptr, RustBuffer target_id
 RustBuffer uniffi_sg_ffi_fn_method_serverglass_target_ids(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_MERGE_BUNDLE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_MERGE_BUNDLE
+RustBuffer uniffi_sg_ffi_fn_method_serverglass_merge_bundle(uint64_t ptr, RustBuffer existing, RustBuffer incoming, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_SCAN_PAIRING_CODE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_SCAN_PAIRING_CODE
+uint64_t uniffi_sg_ffi_fn_method_serverglass_scan_pairing_code(uint64_t ptr, RustBuffer code, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_START_RECEIVING
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SERVERGLASS_START_RECEIVING
+uint64_t uniffi_sg_ffi_fn_method_serverglass_start_receiving(uint64_t ptr, RustBuffer advertise_hosts, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_CLONE_SYNCRECEIVER
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_CLONE_SYNCRECEIVER
+uint64_t uniffi_sg_ffi_fn_clone_syncreceiver(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_FREE_SYNCRECEIVER
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_FREE_SYNCRECEIVER
+void uniffi_sg_ffi_fn_free_syncreceiver(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCRECEIVER_AWAIT_CONNECTION
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCRECEIVER_AWAIT_CONNECTION
+RustBuffer uniffi_sg_ffi_fn_method_syncreceiver_await_connection(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCRECEIVER_PAIRING_CODE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCRECEIVER_PAIRING_CODE
+RustBuffer uniffi_sg_ffi_fn_method_syncreceiver_pairing_code(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCRECEIVER_RECEIVE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCRECEIVER_RECEIVE
+RustBuffer uniffi_sg_ffi_fn_method_syncreceiver_receive(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_CLONE_SYNCSENDER
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_CLONE_SYNCSENDER
+uint64_t uniffi_sg_ffi_fn_clone_syncsender(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_FREE_SYNCSENDER
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_FREE_SYNCSENDER
+void uniffi_sg_ffi_fn_free_syncsender(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCSENDER_SEND
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCSENDER_SEND
+void uniffi_sg_ffi_fn_method_syncsender_send(uint64_t ptr, RustBuffer bundle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCSENDER_VERIFICATION_CODE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_FN_METHOD_SYNCSENDER_VERIFICATION_CODE
+RustBuffer uniffi_sg_ffi_fn_method_syncsender_verification_code(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_FFI_SG_FFI_RUSTBUFFER_ALLOC
 #define UNIFFI_FFIDEF_FFI_SG_FFI_RUSTBUFFER_ALLOC
 RustBuffer ffi_sg_ffi_rustbuffer_alloc(uint64_t size, RustCallStatus *_Nonnull out_status
@@ -615,6 +675,54 @@ uint16_t uniffi_sg_ffi_checksum_method_serverglass_stop(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_TARGET_IDS
 #define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_TARGET_IDS
 uint16_t uniffi_sg_ffi_checksum_method_serverglass_target_ids(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_MERGE_BUNDLE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_MERGE_BUNDLE
+uint16_t uniffi_sg_ffi_checksum_method_serverglass_merge_bundle(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_SCAN_PAIRING_CODE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_SCAN_PAIRING_CODE
+uint16_t uniffi_sg_ffi_checksum_method_serverglass_scan_pairing_code(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_START_RECEIVING
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SERVERGLASS_START_RECEIVING
+uint16_t uniffi_sg_ffi_checksum_method_serverglass_start_receiving(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCRECEIVER_AWAIT_CONNECTION
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCRECEIVER_AWAIT_CONNECTION
+uint16_t uniffi_sg_ffi_checksum_method_syncreceiver_await_connection(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCRECEIVER_PAIRING_CODE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCRECEIVER_PAIRING_CODE
+uint16_t uniffi_sg_ffi_checksum_method_syncreceiver_pairing_code(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCRECEIVER_RECEIVE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCRECEIVER_RECEIVE
+uint16_t uniffi_sg_ffi_checksum_method_syncreceiver_receive(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCSENDER_SEND
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCSENDER_SEND
+uint16_t uniffi_sg_ffi_checksum_method_syncsender_send(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCSENDER_VERIFICATION_CODE
+#define UNIFFI_FFIDEF_UNIFFI_SG_FFI_CHECKSUM_METHOD_SYNCSENDER_VERIFICATION_CODE
+uint16_t uniffi_sg_ffi_checksum_method_syncsender_verification_code(void
     
 );
 #endif

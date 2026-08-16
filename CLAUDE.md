@@ -7,7 +7,7 @@ Read [README.md](README.md) for what it is, [docs/ARCHITECTURE.md](docs/ARCHITEC
 is built, and [docs/DESIGN.md](docs/DESIGN.md) for why the dashboard looks the way it does. This
 file is the part that is easy to get wrong.
 
-## The four invariants
+## The invariants
 
 These are not preferences. A change that breaks one is rejected however well it works.
 
@@ -23,6 +23,10 @@ These are not preferences. A change that breaks one is rejected however well it 
    platform. A UI maps a level onto a colour and lays things out. Nothing else.
 4. **The widget must match the metric.** A ring implies a proportion, so it is only ever drawn for
    a reading with a real maximum. A rate gets a number and a sparkline.
+5. **A credential never leaves the device it was entered on.** Pairing transfers the inventory and
+   the host key pins; the receiving device asks for each credential once and keeps it in its own
+   keystore. `crates/sg-sync` has a test asserting the exact set of fields on the wire, so adding
+   one fails on purpose — see `docs/SYNC.md` for why this is not an oversight but the design.
 
 Invariant 3 is the one that erodes. It has been broken twice, both times by a small convenience —
 a colour threshold written in Swift because it was two lines, then written again in Kotlin with
@@ -56,7 +60,8 @@ hard way:
 ## Verifying
 
 ```bash
-cargo test --workspace                              # 236 tests
+./scripts/check.sh                                  # fmt, clippy, build, 258 tests
+./scripts/check.sh --all                            # plus Swift and Kotlin
 SG_REQUIRE_FIXTURES=1 cargo test --workspace        # turns "fixture missing" into a failure
 swift test --package-path apps                      # Apple storage and vault
 (cd apps/android && gradle :app:testDebugUnitTest)  # Android record format
@@ -109,6 +114,7 @@ crates/sg-transport  russh client, the framed batch channel, host key policy
 crates/sg-collect    the collectors, one module per subsystem
 crates/sg-core       target registry, tick scheduler, rate derivation, ring buffer
 crates/sg-ffi        the UniFFI surface: view models, health verdicts, plain language
+crates/sg-sync       device pairing: the QR handshake, the LAN transfer, the merge rules
 apps/shared          SwiftUI views, shared byte for byte between macOS and iOS
 apps/android         Jetpack Compose
 apps/ios, apps/macos thin shells around apps/shared

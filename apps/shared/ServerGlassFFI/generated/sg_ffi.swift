@@ -680,6 +680,34 @@ public protocol ServerGlassProtocol: AnyObject, Sendable {
     
     func targetIds()  -> [String]
     
+    /**
+     * Apply a received bundle to what this device already has.
+     *
+     * Pure: it decides, it does not store. The caller writes the result to its own keystore and
+     * settings, and shows the conflicts.
+     */
+    func mergeBundle(existing: SyncBundle, incoming: SyncBundle)  -> MergeResult
+    
+    /**
+     * Connect to a scanned pairing code.
+     *
+     * Returns once the handshake is done and a code is available to compare. Nothing has been
+     * sent yet.
+     */
+    func scanPairingCode(code: String) throws  -> SyncSender
+    
+    /**
+     * Start offering this device as the destination for a transfer.
+     *
+     * `advertise_hosts` are every address this device might be reachable at. Pass all of them —
+     * the Wi-Fi address *and* the VPN address if a tunnel is up. Only the platform can enumerate
+     * its interfaces, and which address works depends on where the other device is: over
+     * WireGuard or Tailscale, the tunnel address is often the only one that reaches. The scanner
+     * tries each in turn, so an extra costs one failed connection and a missing one costs the
+     * pairing.
+     */
+    func startReceiving(advertiseHosts: [String]) throws  -> SyncReceiver
+    
 }
 /**
  * The core, as the UIs see it.
@@ -860,6 +888,59 @@ open func targetIds() -> [String]  {
 })
 }
     
+    /**
+     * Apply a received bundle to what this device already has.
+     *
+     * Pure: it decides, it does not store. The caller writes the result to its own keystore and
+     * settings, and shows the conflicts.
+     */
+open func mergeBundle(existing: SyncBundle, incoming: SyncBundle) -> MergeResult  {
+    return try!  FfiConverterTypeMergeResult_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sg_ffi_fn_method_serverglass_merge_bundle(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeSyncBundle_lower(existing),
+        FfiConverterTypeSyncBundle_lower(incoming),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Connect to a scanned pairing code.
+     *
+     * Returns once the handshake is done and a code is available to compare. Nothing has been
+     * sent yet.
+     */
+open func scanPairingCode(code: String)throws  -> SyncSender  {
+    return try  FfiConverterTypeSyncSender_lift(try rustCallWithError(FfiConverterTypeSyncError_lift) {
+        uniffiCallStatus in
+    uniffi_sg_ffi_fn_method_serverglass_scan_pairing_code(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(code),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Start offering this device as the destination for a transfer.
+     *
+     * `advertise_hosts` are every address this device might be reachable at. Pass all of them —
+     * the Wi-Fi address *and* the VPN address if a tunnel is up. Only the platform can enumerate
+     * its interfaces, and which address works depends on where the other device is: over
+     * WireGuard or Tailscale, the tunnel address is often the only one that reaches. The scanner
+     * tries each in turn, so an extra costs one failed connection and a missing one costs the
+     * pairing.
+     */
+open func startReceiving(advertiseHosts: [String])throws  -> SyncReceiver  {
+    return try  FfiConverterTypeSyncReceiver_lift(try rustCallWithError(FfiConverterTypeSyncError_lift) {
+        uniffiCallStatus in
+    uniffi_sg_ffi_fn_method_serverglass_start_receiving(
+            self.uniffiCloneHandle(),
+        FfiConverterSequenceString.lower(advertiseHosts),uniffiCallStatus
+    )
+})
+}
+    
 
     
 }
@@ -903,6 +984,321 @@ public func FfiConverterTypeServerGlass_lift(_ handle: UInt64) throws -> ServerG
 #endif
 public func FfiConverterTypeServerGlass_lower(_ value: ServerGlass) -> UInt64 {
     return FfiConverterTypeServerGlass.lower(value)
+}
+
+
+
+
+
+
+/**
+ * The device being set up: shows a code, waits, receives.
+ */
+public protocol SyncReceiverProtocol: AnyObject, Sendable {
+    
+    /**
+     * Block until the other device connects, then return the code to show.
+     *
+     * Nothing has been received at this point — the caller shows this code, the user compares it
+     * with the other screen, and only then calls [`SyncReceiver::receive`].
+     */
+    func awaitConnection() throws  -> String
+    
+    /**
+     * The text to render as a QR.
+     */
+    func pairingCode()  -> String
+    
+    /**
+     * Take the transfer. Call only after the user confirmed the codes match.
+     */
+    func receive() throws  -> SyncBundle
+    
+}
+/**
+ * The device being set up: shows a code, waits, receives.
+ */
+open class SyncReceiver: SyncReceiverProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_sg_ffi_fn_clone_syncreceiver(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_sg_ffi_fn_free_syncreceiver(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Block until the other device connects, then return the code to show.
+     *
+     * Nothing has been received at this point — the caller shows this code, the user compares it
+     * with the other screen, and only then calls [`SyncReceiver::receive`].
+     */
+open func awaitConnection()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeSyncError_lift) {
+        uniffiCallStatus in
+    uniffi_sg_ffi_fn_method_syncreceiver_await_connection(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * The text to render as a QR.
+     */
+open func pairingCode() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sg_ffi_fn_method_syncreceiver_pairing_code(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Take the transfer. Call only after the user confirmed the codes match.
+     */
+open func receive()throws  -> SyncBundle  {
+    return try  FfiConverterTypeSyncBundle_lift(try rustCallWithError(FfiConverterTypeSyncError_lift) {
+        uniffiCallStatus in
+    uniffi_sg_ffi_fn_method_syncreceiver_receive(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSyncReceiver: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = SyncReceiver
+
+    public static func lift(_ handle: UInt64) throws -> SyncReceiver {
+        return SyncReceiver(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: SyncReceiver) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncReceiver {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: SyncReceiver, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncReceiver_lift(_ handle: UInt64) throws -> SyncReceiver {
+    return try FfiConverterTypeSyncReceiver.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncReceiver_lower(_ value: SyncReceiver) -> UInt64 {
+    return FfiConverterTypeSyncReceiver.lower(value)
+}
+
+
+
+
+
+
+/**
+ * The device that already has the servers: scans a code, sends.
+ */
+public protocol SyncSenderProtocol: AnyObject, Sendable {
+    
+    /**
+     * Send the bundle. Call only after the user confirmed the codes match.
+     */
+    func send(bundle: SyncBundle) throws 
+    
+    /**
+     * The code to show. The user compares it with the other device's.
+     */
+    func verificationCode()  -> String
+    
+}
+/**
+ * The device that already has the servers: scans a code, sends.
+ */
+open class SyncSender: SyncSenderProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_sg_ffi_fn_clone_syncsender(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_sg_ffi_fn_free_syncsender(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Send the bundle. Call only after the user confirmed the codes match.
+     */
+open func send(bundle: SyncBundle)throws   {try rustCallWithError(FfiConverterTypeSyncError_lift) {
+        uniffiCallStatus in
+    uniffi_sg_ffi_fn_method_syncsender_send(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeSyncBundle_lower(bundle),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * The code to show. The user compares it with the other device's.
+     */
+open func verificationCode() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_sg_ffi_fn_method_syncsender_verification_code(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSyncSender: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = SyncSender
+
+    public static func lift(_ handle: UInt64) throws -> SyncSender {
+        return SyncSender(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: SyncSender) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncSender {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: SyncSender, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncSender_lift(_ handle: UInt64) throws -> SyncSender {
+    return try FfiConverterTypeSyncSender.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncSender_lower(_ value: SyncSender) -> UInt64 {
+    return FfiConverterTypeSyncSender.lower(value)
 }
 
 
@@ -1187,6 +1583,85 @@ public func FfiConverterTypeHostHealth_lower(_ value: HostHealth) -> RustBuffer 
 
 
 /**
+ * The result of applying a received bundle to what this device already had.
+ */
+public struct MergeResult: Equatable, Hashable {
+    public var hosts: [SyncHostView]
+    public var knownHosts: [String]
+    public var addedHosts: UInt32
+    public var keptHosts: UInt32
+    public var addedPins: UInt32
+    /**
+     * Each of these needs a person. None were applied.
+     */
+    public var conflicts: [PinConflictView]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(hosts: [SyncHostView], knownHosts: [String], addedHosts: UInt32, keptHosts: UInt32, addedPins: UInt32, 
+        /**
+         * Each of these needs a person. None were applied.
+         */conflicts: [PinConflictView]) {
+        self.hosts = hosts
+        self.knownHosts = knownHosts
+        self.addedHosts = addedHosts
+        self.keptHosts = keptHosts
+        self.addedPins = addedPins
+        self.conflicts = conflicts
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension MergeResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMergeResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MergeResult {
+        return
+            try MergeResult(
+                hosts: FfiConverterSequenceTypeSyncHostView.read(from: &buf), 
+                knownHosts: FfiConverterSequenceString.read(from: &buf), 
+                addedHosts: FfiConverterUInt32.read(from: &buf), 
+                keptHosts: FfiConverterUInt32.read(from: &buf), 
+                addedPins: FfiConverterUInt32.read(from: &buf), 
+                conflicts: FfiConverterSequenceTypePinConflictView.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: MergeResult, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeSyncHostView.write(value.hosts, into: &buf)
+        FfiConverterSequenceString.write(value.knownHosts, into: &buf)
+        FfiConverterUInt32.write(value.addedHosts, into: &buf)
+        FfiConverterUInt32.write(value.keptHosts, into: &buf)
+        FfiConverterUInt32.write(value.addedPins, into: &buf)
+        FfiConverterSequenceTypePinConflictView.write(value.conflicts, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMergeResult_lift(_ buf: RustBuffer) throws -> MergeResult {
+    return try FfiConverterTypeMergeResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMergeResult_lower(_ value: MergeResult) -> RustBuffer {
+    return FfiConverterTypeMergeResult.lower(value)
+}
+
+
+/**
  * One reading, ready to draw.
  *
  * Named `MetricGauge` rather than `Gauge` because SwiftUI exports a `Gauge` view, and an
@@ -1313,6 +1788,67 @@ public func FfiConverterTypeMetricGauge_lift(_ buf: RustBuffer) throws -> Metric
 #endif
 public func FfiConverterTypeMetricGauge_lower(_ value: MetricGauge) -> RustBuffer {
     return FfiConverterTypeMetricGauge.lower(value)
+}
+
+
+/**
+ * A pin the two devices disagree about. Never applied; shown to the user.
+ */
+public struct PinConflictView: Equatable, Hashable {
+    public var host: String
+    public var existing: String
+    public var incoming: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(host: String, existing: String, incoming: String) {
+        self.host = host
+        self.existing = existing
+        self.incoming = incoming
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PinConflictView: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePinConflictView: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PinConflictView {
+        return
+            try PinConflictView(
+                host: FfiConverterString.read(from: &buf), 
+                existing: FfiConverterString.read(from: &buf), 
+                incoming: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PinConflictView, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.host, into: &buf)
+        FfiConverterString.write(value.existing, into: &buf)
+        FfiConverterString.write(value.incoming, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinConflictView_lift(_ buf: RustBuffer) throws -> PinConflictView {
+    return try FfiConverterTypePinConflictView.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinConflictView_lower(_ value: PinConflictView) -> RustBuffer {
+    return FfiConverterTypePinConflictView.lower(value)
 }
 
 
@@ -1553,6 +2089,140 @@ public func FfiConverterTypeSimpleTile_lift(_ buf: RustBuffer) throws -> SimpleT
 #endif
 public func FfiConverterTypeSimpleTile_lower(_ value: SimpleTile) -> RustBuffer {
     return FfiConverterTypeSimpleTile.lower(value)
+}
+
+
+/**
+ * What a device is offering to send, or has received.
+ */
+public struct SyncBundle: Equatable, Hashable {
+    public var hosts: [SyncHostView]
+    public var knownHosts: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(hosts: [SyncHostView], knownHosts: [String]) {
+        self.hosts = hosts
+        self.knownHosts = knownHosts
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SyncBundle: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSyncBundle: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncBundle {
+        return
+            try SyncBundle(
+                hosts: FfiConverterSequenceTypeSyncHostView.read(from: &buf), 
+                knownHosts: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SyncBundle, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeSyncHostView.write(value.hosts, into: &buf)
+        FfiConverterSequenceString.write(value.knownHosts, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncBundle_lift(_ buf: RustBuffer) throws -> SyncBundle {
+    return try FfiConverterTypeSyncBundle.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncBundle_lower(_ value: SyncBundle) -> RustBuffer {
+    return FfiConverterTypeSyncBundle.lower(value)
+}
+
+
+/**
+ * A host as it crosses between devices — no credential, by construction.
+ */
+public struct SyncHostView: Equatable, Hashable {
+    public var address: String
+    public var port: UInt16
+    public var user: String
+    public var authKind: String
+    public var keyPath: String?
+    public var hostKeyPolicy: String
+    public var refreshMs: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(address: String, port: UInt16, user: String, authKind: String, keyPath: String?, hostKeyPolicy: String, refreshMs: UInt64) {
+        self.address = address
+        self.port = port
+        self.user = user
+        self.authKind = authKind
+        self.keyPath = keyPath
+        self.hostKeyPolicy = hostKeyPolicy
+        self.refreshMs = refreshMs
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SyncHostView: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSyncHostView: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncHostView {
+        return
+            try SyncHostView(
+                address: FfiConverterString.read(from: &buf), 
+                port: FfiConverterUInt16.read(from: &buf), 
+                user: FfiConverterString.read(from: &buf), 
+                authKind: FfiConverterString.read(from: &buf), 
+                keyPath: FfiConverterOptionString.read(from: &buf), 
+                hostKeyPolicy: FfiConverterString.read(from: &buf), 
+                refreshMs: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SyncHostView, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.address, into: &buf)
+        FfiConverterUInt16.write(value.port, into: &buf)
+        FfiConverterString.write(value.user, into: &buf)
+        FfiConverterString.write(value.authKind, into: &buf)
+        FfiConverterOptionString.write(value.keyPath, into: &buf)
+        FfiConverterString.write(value.hostKeyPolicy, into: &buf)
+        FfiConverterUInt64.write(value.refreshMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncHostView_lift(_ buf: RustBuffer) throws -> SyncHostView {
+    return try FfiConverterTypeSyncHostView.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncHostView_lower(_ value: SyncHostView) -> RustBuffer {
+    return FfiConverterTypeSyncHostView.lower(value)
 }
 
 
@@ -2065,6 +2735,81 @@ public func FfiConverterTypeSgError_lower(_ value: SgError) -> RustBuffer {
     return FfiConverterTypeSgError.lower(value)
 }
 
+
+public 
+enum SyncError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    case Pairing(detail: String
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension SyncError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSyncError: FfiConverterRustBuffer {
+    typealias SwiftType = SyncError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Pairing(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SyncError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Pairing(detail):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(detail, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncError_lift(_ buf: RustBuffer) throws -> SyncError {
+    return try FfiConverterTypeSyncError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncError_lower(_ value: SyncError) -> RustBuffer {
+    return FfiConverterTypeSyncError.lower(value)
+}
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -2241,6 +2986,31 @@ fileprivate struct FfiConverterSequenceTypeMetricGauge: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypePinConflictView: FfiConverterRustBuffer {
+    typealias SwiftType = [PinConflictView]
+
+    public static func write(_ value: [PinConflictView], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePinConflictView.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PinConflictView] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PinConflictView]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePinConflictView.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeProcessView: FfiConverterRustBuffer {
     typealias SwiftType = [ProcessView]
 
@@ -2288,6 +3058,31 @@ fileprivate struct FfiConverterSequenceTypeSimpleTile: FfiConverterRustBuffer {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSyncHostView: FfiConverterRustBuffer {
+    typealias SwiftType = [SyncHostView]
+
+    public static func write(_ value: [SyncHostView], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSyncHostView.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SyncHostView] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SyncHostView]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSyncHostView.read(from: &buf))
+        }
+        return seq
+    }
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -2328,6 +3123,30 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sg_ffi_checksum_method_serverglass_target_ids() != 39831) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sg_ffi_checksum_method_serverglass_merge_bundle() != 61883) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sg_ffi_checksum_method_serverglass_scan_pairing_code() != 46184) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sg_ffi_checksum_method_serverglass_start_receiving() != 60890) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sg_ffi_checksum_method_syncreceiver_await_connection() != 8627) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sg_ffi_checksum_method_syncreceiver_pairing_code() != 19739) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sg_ffi_checksum_method_syncreceiver_receive() != 27747) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sg_ffi_checksum_method_syncsender_send() != 3465) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sg_ffi_checksum_method_syncsender_verification_code() != 60700) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sg_ffi_checksum_constructor_serverglass_new() != 41771) {

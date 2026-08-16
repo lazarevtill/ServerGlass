@@ -56,15 +56,26 @@ That is the whole setup. There is no Node, no Python, no Docker needed to build 
 
 ## Building and testing
 
+One command runs everything CI runs, in the same order:
+
 ```powershell
-cargo build --workspace
-cargo test --workspace --locked
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo fmt --all -- --check
+pwsh scripts/check.ps1
 ```
 
-All four are what CI runs. A clean checkout takes a few minutes on the first build, mostly
-compiling `aws-lc-sys`.
+It checks formatting, then clippy with warnings denied, then builds, then tests — and stops at the
+first failure with the name of the step. A green run here means a green pipeline. It also tells you
+what to install if `cargo` is missing.
+
+The four steps individually, if you want to run one:
+
+```powershell
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo build --workspace --locked
+cargo test --workspace --locked
+```
+
+A clean checkout takes a few minutes on the first build, mostly compiling `aws-lc-sys`.
 
 ### The live tests
 
@@ -104,10 +115,24 @@ Every one of these was a real bug caught by the CI job, not a hypothetical:
 The pattern: a platform nobody develops on drifts silently. The `rust:windows` job exists to make
 that impossible, and it found three separate breakages on its first two runs.
 
-## For an LLM agent working here
+## Starting cold: the whole loop
 
-Read [CLAUDE.md](../CLAUDE.md) first — the four invariants apply on every platform and are not
-negotiable. Then the Windows-specific rules:
+```powershell
+git clone https://gitlab.lazarev.cloud/lazarevtill/serverglass.git
+cd serverglass
+pwsh scripts/check.ps1
+```
+
+If that passes, the core is built and tested and you are current. Then:
+
+1. Read [CLAUDE.md](../CLAUDE.md) — the invariants, and the list of mistakes this project has
+   already made.
+2. Read the section below for what Windows can and cannot verify.
+3. Make the change, run `pwsh scripts/check.ps1` again, push, **and check the pipeline** — the
+   Windows job is required and it has caught three real portability breakages that a local build on
+   another platform would never have shown.
+
+## For an LLM agent working here
 
 **Shell.** The CI job and these instructions are PowerShell. `sh`-isms (`&&`, `export`, `$(…)`,
 `rm -rf`) do not work in PowerShell. Use `;` to sequence, `$env:NAME = "value"` to set a variable,
@@ -117,16 +142,22 @@ and `Remove-Item -Recurse -Force` to delete.
 
 | Runs on Windows | Needs another machine |
 |---|---|
-| `cargo build` / `test` / `clippy` / `fmt` | `swift test` (macOS only) |
-| The core's whole unit suite | `gradle :app:testDebugUnitTest` (needs the Android SDK) |
-| Live tests, with Docker Desktop + WSL | Building the macOS, iOS or Android apps |
+| `pwsh scripts/check.ps1` — fmt, clippy, build, 258 tests | `swift test` (macOS only) |
+| The whole core: transport, collectors, scheduler, FFI, pairing | `gradle :app:testDebugUnitTest` (needs the Android SDK) |
+| Live SSH tests, with Docker Desktop + WSL | Building the macOS, iOS or Android apps |
+| The device-pairing protocol end to end (`crates/sg-sync`) | Rendering a QR or driving a camera |
+
+That first row is most of the project. The core is where the parsing, scheduling, rate derivation,
+health verdicts, wording and pairing live; the app layers are views over it. A Windows machine can
+work on nearly everything and verify it properly.
 
 Do not claim a change is verified on the Apple or Android side from a Windows machine. Say which
 platform you checked. The single most repeated mistake in this project's history is assuming the
 same code shape behaves the same way on another platform — it has not, four separate times.
 
-**Before pushing:** run all four cargo commands above. CI has been left red for eight commits
-because tests passing locally says nothing about `fmt` and `clippy`.
+**Before pushing:** `pwsh scripts/check.ps1`. CI has been left red for eight commits because tests
+passing locally says nothing about `fmt` and `clippy`, and the script exists so that is one command
+rather than four to remember.
 
 **When a collector needs a shell sweep**, remember the rules in CLAUDE.md: every loop ends with
 `exit 0`, and nothing from a host or a user is ever interpolated into the script. These are about

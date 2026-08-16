@@ -225,3 +225,29 @@ substituted key on every later connection.
 file silently downgrades security); Android passes `filesDir/ssh/known_hosts`. The transport
 creates the containing directory, and a write that still fails is surfaced as
 `HostKeyVerdict::AcceptedUnrecorded` rather than thrown away.
+
+
+## Device pairing
+
+`crates/sg-sync` moves a host inventory from one device to another, and is deliberately not a sync
+service: there is no server, no account, and nothing persists anywhere between the two devices.
+
+One device shows a QR and the other scans it. The code carries a **public** key, a session nonce
+and every address the device might answer at — never a shared secret, because a screen can be
+photographed and a screenshot of a QR is as good as the original. Both sides derive the same
+six-digit verification code from the full transcript; the user compares the two screens, and only
+then does anything transfer. The API is split along that line — connecting returns a code and
+nothing else, sending is a separate call — because an interface where transfer happens in one call
+cannot express the step the security rests on.
+
+The offer lists several addresses because a device usually has several, and which one reaches
+depends on where the other device is: over WireGuard or Tailscale the tunnel address is often the
+only one that works. The scanner tries each in turn with a short per-address timeout.
+
+What crosses: host records and `known_hosts` lines. What does not: passwords, passphrases and
+pasted keys — they are not fields of the wire format at all. The merge rules are where the security
+argument lands: a new pin merges silently, a *conflicting* pin is reported and never applied, and
+local settings win over transferred ones. A sync channel that can quietly rewrite a pin is a
+machine-in-the-middle with extra steps.
+
+See [SYNC.md](SYNC.md) for the research behind those choices.
