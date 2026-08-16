@@ -8,7 +8,7 @@ What is ready, what still has to be done by hand, and what would get the submiss
 |---|---|
 | Public source repository | [github.com/lazarevtill/ServerGlass](https://github.com/lazarevtill/ServerGlass) |
 | FOSS licence file in the repo | [LICENSE-MIT](../LICENSE-MIT) and [LICENSE-APACHE](../LICENSE-APACHE) |
-| Only FOSS dependencies | androidx (Apache-2.0) and JNA (Apache-2.0 / LGPL). No Google Play Services, no Firebase |
+| Only FOSS dependencies | androidx (Apache-2.0) and JNA (Apache-2.0 / LGPL). No Google Play Services, no Firebase — and `fdroid scanner` confirms it against the built APK, not just by reading the dependency list |
 | No prebuilt binaries or blobs in the repo | Verified: `git ls-files` matches no `.so`, `.jar`, `.aar` or `.apk` |
 | A git tag per release, matching the version | `v0.4.0` = versionName 0.4.0, versionCode 6 |
 | `fastlane/metadata/android/en-US/` | Title, both descriptions, icon, three phone screenshots, changelogs |
@@ -101,6 +101,22 @@ curl -sS https://gitlab.com/fdroid/fdroiddata/-/raw/master/config/categories.yml
 cp /path/to/serverglass/docs/fdroid/cloud.lazarev.serverglass.yml metadata/
 /tmp/fd/bin/fdroid lint cloud.lazarev.serverglass    # silence is a pass
 ```
+
+## Scanning the built APK
+
+Lint reads the recipe; the scanner reads what the recipe produced, and it is the one that rejects a
+submission for a proprietary dependency. Point it at the APK the dry run built. `-r` refreshes the
+signature database first, so the check is against what F-Droid currently knows rather than whatever
+shipped with the installed version:
+
+```bash
+export ANDROID_HOME=$HOME/Library/Android/sdk   # it needs dexdump from the build-tools
+/tmp/fd/bin/fdroid scanner -r --exit-code apps/android/app/build/outputs/apk/release/app-release-unsigned.apk
+```
+
+It currently exits 0: no known non-free classes, and no extra signing blocks. Note `--exit-code`,
+without which the scanner reports problems and still exits 0 — the same trap as a skipped test
+reporting `ok`.
 
 ## Submitting
 
