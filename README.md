@@ -240,6 +240,7 @@ Working on this — as a person or as an agent — starts with three files:
 | [CLAUDE.md](CLAUDE.md) | The invariants, the traps, and how to verify a change. Read before editing. |
 | [AGENTS.md](AGENTS.md) | The same, for whichever agent tool is driving. |
 | [docs/WINDOWS.md](docs/WINDOWS.md) | Setup and the platform traps for Windows, where the core builds and the app does not exist yet. |
+| [docs/SYNC.md](docs/SYNC.md) | Research and a staged plan for syncing across devices. Not implemented. |
 
 `fixtures/up.sh` verifies each published port actually reaches the distribution it should. That
 check is not ceremony: container runtimes that proxy published ports can keep a stale forward
