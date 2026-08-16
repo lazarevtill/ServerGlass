@@ -70,6 +70,20 @@ Step "test"    { cargo test --workspace --locked }
 # a Windows machine gets wrong. apps/linux is a separate cargo workspace over the same crates, so
 # adding a dependency to sg-ffi leaves its Cargo.lock behind and the `linux:app` job fails on
 # `--locked` — which is exactly how it went red for four pipelines. Resolving needs no GTK.
+# `sg-bindgen` ships two binaries — the uniffi one for Apple and Android, the C# one here — so a
+# call that does not say which is ambiguous and fails outright. When the second binary landed it
+# broke the macOS, iOS and Android builds at once, and nothing noticed because no test builds an
+# app. A Windows machine cannot run those builds either, but it can check the scripts.
+Step "build scripts name their generator" {
+    $offenders = Select-String -Path "$PSScriptRoot\build-*.sh", "$PSScriptRoot\build-*.ps1" `
+        -Pattern 'cargo run.*sg-bindgen' | Where-Object { $_.Line -notmatch '--bin' }
+    if ($offenders) {
+        $offenders | ForEach-Object { Write-Host "  $($_.Filename):$($_.LineNumber): $($_.Line.Trim())" }
+        Write-Host "the calls above must pass --bin: sg-bindgen has more than one binary" -ForegroundColor Red
+        exit 1
+    }
+}
+
 Step "linux app lockfile" {
     cargo metadata --locked --manifest-path (Join-Path $PSScriptRoot '..\apps\linux\Cargo.toml') --format-version 1 | Out-Null
 }
