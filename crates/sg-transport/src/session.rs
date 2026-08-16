@@ -117,8 +117,13 @@ fn learn(
 ) -> std::result::Result<(), std::io::Error> {
     let directory = match known_hosts {
         Some(path) => path.parent().map(std::path::Path::to_path_buf),
-        // Nothing configured: the desktop case, where `~/.ssh` is what russh will use.
-        None => std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".ssh")),
+        // Nothing configured: the desktop case, where `~/.ssh` is what russh will use. Windows
+        // has no `HOME` — it has `USERPROFILE` — and looking only at the former would have skipped
+        // creating the directory there, reintroducing on Windows exactly the silent failure this
+        // function exists to fix.
+        None => std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(|home| std::path::Path::new(&home).join(".ssh")),
     };
 
     if let Some(directory) = directory {
