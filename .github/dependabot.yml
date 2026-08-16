@@ -1,0 +1,53 @@
+# Dependency updates for the public mirror.
+#
+# Grouped and monthly rather than per-crate and weekly: this repository has five build systems, and
+# a stream of single-dependency pull requests across all of them is noise that gets ignored, which
+# is worse than no automation at all.
+#
+# Note that apps/linux has its own Cargo.lock over the same crates — a second ecosystem entry, not
+# a mistake. It has gone stale in silence before and left `linux:app` red for four pipelines.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      rust:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: cargo
+    directory: "/apps/linux"
+    schedule:
+      interval: monthly
+    groups:
+      linux-app:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: gradle
+    directory: "/apps/android"
+    schedule:
+      interval: monthly
+    groups:
+      android:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: nuget
+    directory: "/apps/windows"
+    schedule:
+      interval: monthly
+    groups:
+      windows:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

@@ -1,0 +1,74 @@
+name: Bug report
+description: Something reads wrong, crashes, or does not do what it says
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Found a security vulnerability instead? Do not file it here — see
+        [SECURITY.md](https://github.com/lazarevtill/ServerGlass/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add a server with…
+        2. Open the readings screen
+        3. The memory ring shows…
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Which app
+      description: A bug on one platform is often absent on the others, so this narrows it a long way.
+      multiple: true
+      options:
+        - macOS
+        - iOS / iPadOS
+        - Android
+        - Linux (GTK)
+        - Windows
+        - The Rust core / CLI, no app involved
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ServerGlass version
+      description: From the app's about screen, or the commit you built.
+      placeholder: "0.4.0, or 3f346a8"
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: The monitored host
+      description: >
+        Distribution and kernel, and whether it is a container, a VM or bare metal. Most parsing
+        bugs are a specific distribution's format — BusyBox versus GNU coreutils especially.
+      placeholder: "Debian 12, 6.1.0, LXC container"
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >
+        Logs, a screenshot, or the raw `/proc` or `/sys` file that is being misread — the last of
+        those turns a guess into a test case. Check it for hostnames and addresses first.
+    validations:
+      required: false

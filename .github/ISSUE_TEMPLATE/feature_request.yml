@@ -1,0 +1,42 @@
+name: Feature request
+description: A metric, a source, or a flow that should exist
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The [roadmap](https://github.com/lazarevtill/ServerGlass#roadmap) lists what is already
+        planned — a terminal, declarative probes, Prometheus scraping, containers and
+        orchestration, the plugin SDK, and `Sink` exporters. Adding a comment to an existing
+        thread is more useful than a duplicate.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to find out about your servers?
+      description: >
+        The problem rather than the solution. "I cannot tell which container is eating the disk"
+        leads somewhere better than "add a column to the container table".
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Does it fit the invariants?
+      description: >
+        Listed in [CONTRIBUTING.md](https://github.com/lazarevtill/ServerGlass/blob/main/CONTRIBUTING.md).
+        They are why the app installs nothing and stores nothing, and a request that needs one
+        broken is worth discussing on those terms rather than being quietly turned down. Tick what
+        you are confident of; leaving them blank is fine.
+      options:
+        - label: It needs nothing installed or written on the monitored host
+        - label: It needs no measurement stored on disk
+        - label: It can be read in the one round trip a refresh already costs

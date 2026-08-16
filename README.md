@@ -1,11 +1,11 @@
 # ServerGlass
 
-Agentless server monitoring for macOS, iOS, iPadOS, Android and Linux.
+Agentless server monitoring for macOS, iOS, iPadOS, Android, Windows and Linux.
 
 [![CI](https://github.com/lazarevtill/ServerGlass/actions/workflows/ci.yml/badge.svg)](https://github.com/lazarevtill/ServerGlass/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#licence)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
-![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20iOS%20%7C%20Android%20%7C%20Linux-lightgrey.svg)
+![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20iOS%20%7C%20Android%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)
 
 Nothing is installed on the servers you monitor. ServerGlass opens one SSH connection, reads
 `/proc` and `/sys`, and renders it — so any box you can already SSH into is already monitorable.
@@ -336,8 +336,15 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
   password between launches the way the Keychain and the Android Keystore do.
 - Sensor parsing is covered by tests against captured `hwmon` layouts, but no machine available
   here exposes hwmon chips, so the sweep has not been run against real sensor hardware.
-- CI builds and tests the Rust core and the Linux app. No macOS or Android runner is configured,
-  so those apps are built locally.
+
+## Contributing
+
+Bug reports and patches are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) has the invariants a patch
+has to keep, the checks to run first, and the specific mistakes that get one sent back — most of
+them learned here rather than in the abstract.
+
+Found a security problem? Please do not open a public issue — [SECURITY.md](SECURITY.md) explains
+how to report it privately, and describes the security model so a report can be aimed usefully.
 
 ## Licence
 

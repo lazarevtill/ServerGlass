@@ -15,3 +15,6 @@ One command verifies everything CI verifies, on either platform:
 ```
 
 Both files are the same instructions for any agent, whichever tool is driving.
+
+Opening a pull request rather than committing directly? [CONTRIBUTING.md](CONTRIBUTING.md) is the
+human-facing version of the same rules, and is what a reviewer will hold the change to.
