@@ -35,7 +35,7 @@ jobs:
         # had been sitting in the tree. This job is the core only; the app has its own below.
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust
         run: |
           rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal --component clippy,rustfmt
@@ -53,7 +53,7 @@ jobs:
     # 24.04 ships GTK 4.14 and libadwaita 1.5; the app needs 4.10 and 1.4 at least.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install GTK
         run: |
           sudo apt-get update -qq
@@ -76,12 +76,12 @@ jobs:
     name: Windows app
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust
         run: |
           rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
           rustup default ${{ env.RUST_VERSION }}
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           # Pinned to the channel the app targets, for the same reason the Rust toolchain is.
           dotnet-version: "9.0.x"
@@ -119,8 +119,8 @@ jobs:
     name: Android app (the F-Droid build path)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -129,7 +129,7 @@ jobs:
       # one thing an F-Droid submission must not contain — so without this the build would run on
       # whatever Gradle the image happened to ship that week. 9.7.0 is what the local build and the
       # clean-clone dry run both used against AGP 8.9.0.
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "9.7.0"
       - name: Install Rust and the Android target
