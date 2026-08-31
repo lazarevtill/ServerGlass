@@ -36,7 +36,7 @@ sg-sync = { path = "../../crates/sg-sync" }
 
 gtk4 = { version = "0.9", features = ["v4_10"] }
 adw = { package = "libadwaita", version = "0.7", features = ["v1_4"] }
-glib = "0.20"
+glib = "0.22"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
