@@ -86,7 +86,7 @@ dependencies {
     // The record format is pure Kotlin plus org.json, so it is tested on the JVM rather than on a
     // device: a test that needs an emulator is a test that does not run.
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20260719")
+    testImplementation("org.json:json:20260814")
 
     // Passwords and passphrases, encrypted with a key held in the Android Keystore.
     implementation("androidx.security:security-crypto:1.1.0")
