@@ -69,7 +69,7 @@ impl LiveStore {
         }
         for sample in samples {
             match sample.value.as_f64() {
-                Some(value) => {
+                Some(value) if value.is_finite() => {
                     let series = self.history.entry(sample.series.clone()).or_default();
                     series.push_back(Point {
                         at_ms: sample.at_ms,
@@ -79,13 +79,22 @@ impl LiveStore {
                         series.pop_front();
                     }
                 }
-                None => {
+                _ => {
                     if let sg_model::Value::Text(text) = &sample.value {
                         self.text.insert(sample.series.clone(), text.clone());
                     }
                 }
             }
         }
+    }
+
+    /// Forget series absent from a complete tick, even if their host entity is still present.
+    /// Swap can be disabled or a collector removed without removing the host itself.
+    pub fn retain_series(&mut self, descriptors: &[SeriesDescriptor]) {
+        let present: std::collections::HashSet<_> = descriptors.iter().map(|d| &d.id).collect();
+        self.descriptors.retain(|id, _| present.contains(id));
+        self.history.retain(|id, _| present.contains(id));
+        self.text.retain(|id, _| present.contains(id));
     }
 
     /// Drop entities absent from `present`, along with their series.
@@ -207,6 +216,40 @@ mod tests {
 
     fn host() -> Entity {
         Entity::host("web-01")
+    }
+
+    #[test]
+    fn disappearing_metrics_are_removed_even_when_the_host_remains() {
+        let mut store = LiveStore::default();
+        let swap = descriptor(&host().id, "swap");
+        let memory = descriptor(&host().id, "memory");
+        store.ingest(
+            vec![host()],
+            vec![swap.clone(), memory.clone()],
+            &[
+                Sample::new(swap.id.clone(), 0, 40.0),
+                Sample::new(memory.id.clone(), 0, 50.0),
+            ],
+        );
+        store.retain_series(std::slice::from_ref(&memory));
+        assert!(store.entity(&host().id).is_some());
+        assert!(store.descriptor(&swap.id).is_none());
+        assert!(store.latest(&swap.id).is_none());
+        assert_eq!(store.point_count(), 1);
+    }
+
+    #[test]
+    fn non_finite_readings_do_not_reach_charts_or_json() {
+        let mut store = LiveStore::default();
+        let d = descriptor(&host().id, "cpu");
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            store.ingest(
+                vec![host()],
+                vec![d.clone()],
+                &[Sample::new(d.id.clone(), 0, value)],
+            );
+        }
+        assert_eq!(store.point_count(), 0);
     }
 
     #[test]

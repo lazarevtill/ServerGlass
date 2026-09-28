@@ -14,6 +14,28 @@ import Testing
 /// removes what it wrote.
 @Suite(.serialized)
 struct HostStoreTests {
+    @Test("corrupt inventory is reported and left intact")
+    func corruptInventorySurvives() {
+        let key = "sg.hosts.v1"
+        let original = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(original, forKey: key) }
+        let damaged = Data("{ broken record".utf8)
+        UserDefaults.standard.set(damaged, forKey: key)
+        #expect(throws: (any Error).self) { try HostStore.load() }
+        #expect(UserDefaults.standard.data(forKey: key) == damaged)
+    }
+
+    @Test("updating a secret replaces it without deleting its companion key")
+    func updateSecret() {
+        let id = UUID().uuidString
+        defer { Keychain.removeSecret(for: id); Keychain.removeSecret(for: id, kind: .keyText) }
+        guard Keychain.setSecret("old", for: id) else { return }
+        #expect(Keychain.setSecret("key", for: id, kind: .keyText))
+        #expect(Keychain.setSecret("new", for: id))
+        #expect(Keychain.secret(for: id) == "new")
+        #expect(Keychain.secret(for: id, kind: .keyText) == "key")
+    }
+
     /// A host nobody else's test will collide with.
     private func sample(_ address: String = "10.0.0.9") -> HostStore.SavedHost {
         HostStore.SavedHost(
@@ -22,7 +44,7 @@ struct HostStoreTests {
     }
 
     private func clear() {
-        for host in HostStore.load() { HostStore.forget(host) }
+        for host in (try? HostStore.load()) ?? [] { HostStore.forget(host) }
         HostStore.save([])
     }
 
@@ -34,7 +56,7 @@ struct HostStoreTests {
         let host = sample()
         HostStore.save([host])
 
-        let loaded = HostStore.load()
+        let loaded = try HostStore.load()
         #expect(loaded.count == 1)
         #expect(loaded.first == host, "every field must survive, not just the address")
     }
@@ -48,7 +70,7 @@ struct HostStoreTests {
 
         let host = sample()
         HostStore.save([host])
-        #expect(HostStore.load().first?.id == host.id)
+        #expect(try HostStore.load().first?.id == host.id)
     }
 
     /// The record is what gets backed up and inspected. A password in it would be a password on

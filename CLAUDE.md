@@ -61,7 +61,7 @@ hard way:
 ## Verifying
 
 ```bash
-./scripts/check.sh                                  # fmt, clippy, build, 272 tests
+./scripts/check.sh                                  # fmt, clippy, build, tests
 ./scripts/check.sh --all                            # plus Swift and Kotlin
 .\scripts\check.ps1 -All                            # the same, on Windows, plus the WinUI app
 ./scripts/build-linux.sh --run                      # build and run the GTK app
@@ -101,12 +101,12 @@ The live tests need the fixtures: `./fixtures/up.sh` (Debian and Alpine sshd con
 GNU-versus-busybox parsing differences). Without `SG_REQUIRE_FIXTURES=1` they skip themselves and
 report `ok`, which has already hidden a broken container once.
 
-**CI is GitLab (`.gitlab-ci.yml`, gitlab.lazarev.cloud) and runs the Rust jobs on Linux and
-Windows, the Linux app on Linux, and the Windows app on Windows.** No macOS or Android runner is
-configured, so the Swift and Kotlin suites are yours to run before pushing. The Windows jobs are a
-shell runner that installs its own toolchain — `rust:windows` is the only thing checking that the
-core compiles for a platform none of us develops on, and it earned that on its first run by
-catching a Unix-only agent call.
+**CI is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).** It runs the Rust
+suite on Linux and Windows, builds and tests the Linux, Windows, macOS and Android front-ends,
+and requires live SSH fixtures on Linux. The macOS build checks that the packaged executable
+embeds the Rust core instead of loading a library from a developer checkout. The Swift tests
+exercise that bridge. iOS still needs a local simulator build and launch check. Windows UI
+behavior and DPAPI must be checked on Windows; cross-platform core tests cannot verify them.
 
 Check the pipeline after pushing. It was left red for eight commits once, because tests passing
 locally says nothing about `fmt` and `clippy`.

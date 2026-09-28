@@ -33,8 +33,13 @@ public struct AddHostSheet: View {
 
     @State private var address = ""
     @State private var port = "22"
-    @State private var user = NSUserName()
-    @State private var authKind = "agent"
+    #if os(macOS)
+        @State private var user = NSUserName()
+        @State private var authKind = "agent"
+    #else
+        @State private var user = "root"
+        @State private var authKind = "password"
+    #endif
     @State private var keyPath = ""
     @State private var keyText = ""
     @State private var secret = ""
@@ -47,7 +52,7 @@ public struct AddHostSheet: View {
     private var isValid: Bool {
         !address.trimmingCharacters(in: .whitespaces).isEmpty
             && !user.trimmingCharacters(in: .whitespaces).isEmpty
-            && UInt16(port) != nil
+            && (UInt16(port) ?? 0) > 0
             && (authKind != "key" || !keyPath.isEmpty)
             // An edit keeps the key it already has, so an empty box is not an empty key.
             && (authKind != "key_text" || !keyText.isEmpty || isEditing)
@@ -75,7 +80,9 @@ public struct AddHostSheet: View {
                     // Agent first and default: with it, ServerGlass never holds key material.
                     // It is also the only option a phone cannot use, which is why the paste
                     // option exists directly below it.
-                    Text("SSH agent").tag("agent")
+                    #if os(macOS)
+                        Text("SSH agent").tag("agent")
+                    #endif
                     Text("Private key").tag("key")
                     Text("Paste a key").tag("key_text")
                     Text("Password").tag("password")
@@ -230,8 +237,9 @@ public struct AddHostSheet: View {
         let path = authKind == "key" ? keyPath : nil
         let key = authKind == "key_text" ? keyText : nil
 
+        let succeeded: Bool
         if let targetId = editingTargetId {
-            model.updateHost(
+            succeeded = model.updateHost(
                 id: targetId,
                 address: trimmedAddress,
                 port: UInt16(port) ?? 22,
@@ -246,7 +254,7 @@ public struct AddHostSheet: View {
                 refreshMs: UInt64(refreshSeconds * 1000)
             )
         } else {
-            model.addHost(
+            succeeded = model.addHost(
                 address: trimmedAddress,
                 port: UInt16(port) ?? 22,
                 user: trimmedUser,
@@ -258,7 +266,7 @@ public struct AddHostSheet: View {
                 refreshMs: UInt64(refreshSeconds * 1000)
             )
         }
-        dismiss()
+        if succeeded { dismiss() }
     }
 }
 

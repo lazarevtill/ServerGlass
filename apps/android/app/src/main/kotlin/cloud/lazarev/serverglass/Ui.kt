@@ -1,5 +1,7 @@
 package cloud.lazarev.serverglass
 
+import uniffi.sg_ffi.ConnectionState
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -76,12 +78,12 @@ object Theme {
     /// Slightly lifted from `panel`, for the larger simple-view cards. One flat surface colour at
     /// every size makes big cards read as empty space.
     val card = Color(0xFF19191D)
-    val border = Color(0x0FFFFFFF)
+    val border = Color(0x1AFFFFFF)
     val track = Color(0x14FFFFFF)
 
     val primary = Color(0xEBFFFFFF)
-    val secondary = Color(0x73FFFFFF)
-    val tertiary = Color(0x47FFFFFF)
+    val secondary = Color(0xB8FFFFFF)
+    val tertiary = Color(0x8CFFFFFF)
 
     val good = Color(0xFF59D68C)
     val warn = Color(0xFFFABF47)
@@ -390,7 +392,7 @@ fun SimpleHostScreen(
         }
         item { HealthCard(snapshot.health, name) }
 
-        if (snapshot.simpleTiles.isEmpty()) {
+        if (snapshot.simpleTiles.isEmpty() && snapshot.health.level == "checking" && snapshot.state !is ConnectionState.Idle) {
             item {
                 Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Theme.secondary)

@@ -19,6 +19,7 @@ mod sync;
 mod view;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use sg_core::{default_sources, TargetRuntime, TargetState};
@@ -61,16 +62,18 @@ type CommandJob = (
 struct Target {
     config: TargetConfig,
     snapshot: Arc<RwLock<TargetSnapshot>>,
-    /// Dropping this aborts the poll loop.
-    task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    task: Mutex<Option<RunningTask>>,
+    generation: AtomicU64,
+}
+
+struct RunningTask {
+    handle: tokio::task::JoinHandle<()>,
     /// Commands waiting to run on the poll loop's session.
     ///
     /// A queue rather than a second connection: the poll loop owns the session, and opening
     /// another one per command would authenticate again, double the connections a host sees, and
     /// give the command a different environment from the one the readings come from.
     commands: tokio::sync::mpsc::UnboundedSender<CommandJob>,
-    /// Held so the receiver survives being handed to each new poll-loop attempt.
-    command_inbox: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<CommandJob>>,
 }
 
 /// What one command printed, and how it ended.
@@ -125,16 +128,13 @@ impl ServerGlass {
             ConnectionState::Idle,
         )));
 
-        let (commands, command_inbox) = tokio::sync::mpsc::unbounded_channel();
-
         self.targets.write().expect("targets lock").insert(
             id.clone(),
             Arc::new(Target {
                 config,
                 snapshot,
                 task: Mutex::new(None),
-                commands,
-                command_inbox: tokio::sync::Mutex::new(command_inbox),
+                generation: AtomicU64::new(0),
             }),
         );
         id
@@ -145,14 +145,23 @@ impl ServerGlass {
         let target = self.target(&target_id)?;
 
         let mut slot = target.task.lock().expect("task lock");
-        if slot.as_ref().is_some_and(|t| !t.is_finished()) {
+        if slot.as_ref().is_some_and(|t| !t.handle.is_finished()) {
             return Ok(());
         }
 
-        let handle = self
-            .runtime
-            .spawn(poll_loop(target_id, Arc::clone(&target)));
-        *slot = Some(handle);
+        // Each run owns its inbox. Stopping drops queued commands instead of carrying them into
+        // a later start, and immediately publishes the state the UI should display.
+        let (commands, inbox) = tokio::sync::mpsc::unbounded_channel();
+        let generation = {
+            let mut snapshot = target.snapshot.write().expect("snapshot lock");
+            let generation = target.generation.fetch_add(1, Ordering::Relaxed) + 1;
+            snapshot.set_state(ConnectionState::Connecting);
+            generation
+        };
+        let handle =
+            self.runtime
+                .spawn(poll_loop(target_id, Arc::clone(&target), inbox, generation));
+        *slot = Some(RunningTask { handle, commands });
         Ok(())
     }
 
@@ -184,24 +193,27 @@ impl ServerGlass {
         // the channel and run on reconnect — minutes later, with nobody watching, having been
         // typed against a machine in a different state. `systemctl restart` firing five minutes
         // after someone gave up on it is not a delay, it is a surprise.
-        if !matches!(
-            target.snapshot.read().expect("snapshot lock").state,
-            ConnectionState::Online
-        ) {
-            return Err(SgError::Connection {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        {
+            let task = target.task.lock().expect("task lock");
+            let snapshot = target.snapshot.read().expect("snapshot lock");
+            let disconnected = || SgError::Connection {
                 detail: "This server is not connected, so the command was not run.".into(),
                 recoverable: true,
-            });
+            };
+            let task = task
+                .as_ref()
+                .filter(|t| !t.handle.is_finished())
+                .ok_or_else(disconnected)?;
+            if snapshot.state != ConnectionState::Online {
+                return Err(disconnected());
+            }
+            // Hold the state read lock through enqueueing, so a disconnect cannot drain the
+            // inbox between the online check and the send.
+            task.commands
+                .send((command, reply))
+                .map_err(|_| disconnected())?;
         }
-
-        let (reply, answer) = tokio::sync::oneshot::channel();
-        target
-            .commands
-            .send((command, reply))
-            .map_err(|_| SgError::Connection {
-                detail: "This server is not connected.".into(),
-                recoverable: true,
-            })?;
 
         // A bounded wait: a command that never returns must not leave the caller's thread parked
         // for the life of the app. Sixty seconds is long enough for a package list and short
@@ -231,11 +243,15 @@ impl ServerGlass {
     /// Stop refreshing and drop the connection.
     pub fn stop(&self, target_id: String) -> Result<(), SgError> {
         let target = self.target(&target_id)?;
-        if let Some(handle) = target.task.lock().expect("task lock").take() {
-            handle.abort();
+        let mut task = target.task.lock().expect("task lock");
+        if let Some(task) = task.take() {
+            task.handle.abort();
         }
         let mut snapshot = target.snapshot.write().expect("snapshot lock");
-        snapshot.state = ConnectionState::Idle;
+        // abort() is asynchronous. A tick already building its view model must not overwrite
+        // Idle, or a new run's state, after stop has returned.
+        target.generation.fetch_add(1, Ordering::Relaxed);
+        snapshot.set_state(ConnectionState::Idle);
         Ok(())
     }
 
@@ -289,10 +305,17 @@ impl ServerGlass {
 }
 
 /// Connect, then refresh forever, republishing a snapshot after each tick.
-async fn poll_loop(target_id: String, target: Arc<Target>) {
+async fn poll_loop(
+    target_id: String,
+    target: Arc<Target>,
+    mut inbox: tokio::sync::mpsc::UnboundedReceiver<CommandJob>,
+    generation: u64,
+) {
     let publish = |state: ConnectionState| {
         let mut snapshot = target.snapshot.write().expect("snapshot lock");
-        snapshot.state = state;
+        if target.generation.load(Ordering::Relaxed) == generation {
+            snapshot.set_state(state);
+        }
     };
 
     let interval = std::time::Duration::from_millis(target.config.refresh_ms.clamp(250, 60_000));
@@ -338,13 +361,16 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
         // complete and stable the moment it appears.
         let mut published_first = false;
 
-        loop {
+        'refresh: loop {
             let tick_started = tokio::time::Instant::now();
             match runtime.tick().await {
                 Ok(tick) => {
                     if published_first {
                         let snapshot = build_snapshot(&target_id, &runtime, &tick);
-                        *target.snapshot.write().expect("snapshot lock") = snapshot;
+                        let mut current = target.snapshot.write().expect("snapshot lock");
+                        if target.generation.load(Ordering::Relaxed) == generation {
+                            *current = snapshot;
+                        }
                     } else {
                         published_first = true;
                         publish(ConnectionState::Online);
@@ -368,12 +394,13 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
             // just pressed Return should not wait out a ten-second refresh interval, and a slow
             // command must not delay the readings any longer than it has to.
             loop {
-                let mut inbox = target.command_inbox.lock().await;
                 tokio::select! {
                     _ = &mut until_next => break,
                     job = inbox.recv() => {
                         let Some((command, reply)) = job else { break };
-                        drop(inbox);
+                        // A caller that timed out has withdrawn its queued command. Executing it
+                        // now could apply an action after the user was told it did not complete.
+                        if reply.is_closed() { continue; }
                         let answer = runtime
                             .run_command(&command)
                             .await
@@ -391,7 +418,7 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
                             // `run_command` has already moved the runtime into Reconnecting or
                             // Failed; surface it and rebuild the session.
                             publish(ConnectionState::from(runtime.state()));
-                            break;
+                            break 'refresh;
                         }
                     }
                 }
@@ -401,7 +428,6 @@ async fn poll_loop(target_id: String, target: Arc<Target>) {
         // The session is gone. Anything still queued was typed against it, so it is refused here
         // rather than carried into the next one.
         {
-            let mut inbox = target.command_inbox.lock().await;
             while let Ok((_, reply)) = inbox.try_recv() {
                 let _ = reply.send(Err(
                     "The connection dropped before the command could run.".to_string()
@@ -449,6 +475,12 @@ fn build_snapshot(
     };
 
     let state = ConnectionState::from(runtime.state());
+    let mut all = gauges.clone();
+    all.extend(
+        detail_groups
+            .iter()
+            .flat_map(|group| group.gauges.iter().cloned()),
+    );
     TargetSnapshot {
         target_id: target_id.to_string(),
         state: state.clone(),
@@ -457,12 +489,8 @@ fn build_snapshot(
         kernel: caps.map(|c| c.kernel.clone()).unwrap_or_default(),
         arch: caps.map(|c| c.arch.clone()).unwrap_or_default(),
         cpu_count: caps.map(|c| c.cpu_count).unwrap_or(0),
-        health: plain::assess(&state, &gauges, !gauges.is_empty()),
-        simple_tiles: {
-            let mut all = gauges.clone();
-            all.extend(detail_groups.iter().flat_map(|g| g.gauges.iter().cloned()));
-            simple_tiles(&gauges, &all, &entities)
-        },
+        health: plain::assess(&state, &all, !all.is_empty()),
+        simple_tiles: simple_tiles(&gauges, &all, &entities),
         gauges,
         detail_groups,
         entities,
@@ -490,6 +518,58 @@ mod tests {
             known_hosts_path: None,
             refresh_ms: 1000,
         }
+    }
+
+    #[test]
+    fn state_changes_update_the_verdict_without_waiting_for_a_tick() {
+        let mut snapshot = TargetSnapshot::placeholder("t1", "host", ConnectionState::Online);
+        snapshot.health = plain::assess(&ConnectionState::Online, &[], true);
+        assert_eq!(snapshot.health.level, "ok");
+        snapshot.set_state(ConnectionState::Failed {
+            message: "connection closed".into(),
+            recoverable: true,
+        });
+        assert_eq!(snapshot.health.level, "offline");
+        snapshot.set_state(ConnectionState::Idle);
+        assert_eq!(snapshot.health.headline, "Not connected");
+        snapshot.set_state(ConnectionState::Connecting);
+        assert_eq!(snapshot.health.headline, "Connecting…");
+    }
+
+    #[test]
+    fn stopping_discards_queued_commands_before_a_restart() {
+        let core = ServerGlass::new();
+        let id = core.add_target(config("127.0.0.1"));
+        core.start(id.clone()).unwrap();
+        let target = core.target(&id).unwrap();
+        let old_sender = target
+            .task
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .commands
+            .clone();
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        old_sender
+            .send(("must not run later".into(), reply))
+            .unwrap();
+        core.stop(id.clone()).unwrap();
+        assert_eq!(
+            core.snapshot(id.clone()).unwrap().health.headline,
+            "Not connected"
+        );
+        core.start(id.clone()).unwrap();
+        core.runtime.block_on(async {
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_secs(2), answer)
+                    .await
+                    .unwrap()
+                    .is_err()
+            );
+        });
+        assert!(old_sender.is_closed());
+        core.stop(id).unwrap();
     }
 
     #[test]

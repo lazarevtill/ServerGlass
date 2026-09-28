@@ -50,7 +50,8 @@ build_macos() {
     # Ad-hoc signature. It does not satisfy Gatekeeper — the first launch still needs
     # right-click > Open, or `xattr -dr com.apple.quarantine` — but it does stop macOS treating
     # the binary as damaged, which is what an entirely unsigned bundle looks like.
-    codesign --force --deep --sign - "$staging/ServerGlass.app" 2>/dev/null || true
+    codesign --force --sign - "$staging/ServerGlass.app"
+    codesign --verify --strict "$staging/ServerGlass.app"
 
     rm -f "$dmg"
     hdiutil create -volname "ServerGlass" -srcfolder "$staging" -ov -format UDZO "$dmg" >/dev/null

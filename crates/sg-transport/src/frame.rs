@@ -94,7 +94,7 @@ impl Framing {
             // Braces group the command so the redirect applies to all of it; `__sg` holds the
             // status because the printf that follows would otherwise clobber `$?`.
             script.push_str(&format!(
-                "printf {}\n{{ {}; }} 2>/dev/null\n__sg=$?\nprintf {} \"$__sg\"\n",
+                "printf {}\n{{ {}; }} </dev/null 2>/dev/null\n__sg=$?\nprintf {} \"$__sg\"\n",
                 shell_quote(&self.begin(&id)),
                 command,
                 shell_quote(&format!("{}%s\n", self.end_prefix(&id))),

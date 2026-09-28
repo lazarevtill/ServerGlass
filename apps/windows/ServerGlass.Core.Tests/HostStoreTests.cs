@@ -175,6 +175,8 @@ public sealed class HostStoreTests : IDisposable
 
         Assert.Empty(store.Load());
         Assert.NotNull(reported);
+        Assert.Throws<InvalidOperationException>(() => store.Save([Sample()]));
+        Assert.Equal("{ this is not the list }", File.ReadAllText(store.HostsPath));
     }
 
     /// <summary>An empty store is an empty list, not a crash on first launch.</summary>

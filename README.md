@@ -326,9 +326,8 @@ was, which is exactly what a parser bug is made of. Both a GNU and a BusyBox hos
 
 - Setup still assumes someone who knows what a hostname and an SSH key are. The *reading*
   experience is written for a non-technical person; the *adding* experience is not yet.
-- CI runs the Rust suite on Linux and on Windows, and builds and tests the Linux and Windows apps.
-  The Swift and Kotlin tests exist and pass locally, but no macOS or Android runner is configured
-  to run them.
+- CI builds and tests the core and the Linux, Windows, macOS and Android front-ends. iOS still
+  needs local simulator verification, and native UI behavior needs a launch check on each platform.
 - The Windows app cannot scan a pairing QR, because a desktop has no camera. It shows one to
   receive an inventory and takes a pasted code to send one.
 - The Linux app keeps a password or key passphrase in memory for the run rather than in the Secret

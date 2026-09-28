@@ -65,7 +65,7 @@ pub const STYLE: &str = "
 
 .sg-headline { font-size: 1.6rem; font-weight: 700; }
 .sg-tile-value { font-size: 1.5rem; font-weight: 700; font-feature-settings: 'tnum'; }
-.sg-tile-name { font-size: 0.85rem; opacity: 0.7; letter-spacing: 0.04em; }
+.sg-tile-name { font-size: 0.9rem; opacity: 0.85; letter-spacing: 0.04em; }
 .sg-tile-summary { font-size: 0.9rem; opacity: 0.8; }
 
 /* Monospaced, tabular figures: a changing value must not make the layout twitch. */

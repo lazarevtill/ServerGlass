@@ -145,7 +145,10 @@ public struct ContentView: View {
                             }
                     }
                     .onDelete { offsets in
-                        for index in offsets { model.removeHost(id: model.hosts[index].id) }
+                        // Resolve IDs before mutating the array. Deleting the first selected row
+                        // shifts every later index and used to remove the wrong host or trap.
+                        let ids = offsets.map { model.hosts[$0].id }
+                        for id in ids { model.removeHost(id: id) }
                     }
                 }
             }
@@ -220,7 +223,7 @@ struct Sidebar: View {
             // only appears once it means something.
             if model.hosts.count > 1 {
                 Label("All hosts", systemImage: "square.grid.2x2")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.body.weight(.medium))
                     .tag(Selection.statusID)
             }
 
@@ -259,21 +262,21 @@ struct SidebarRow: View {
             Circle().fill(host.statusColor).frame(width: 7, height: 7)
             VStack(alignment: .leading, spacing: 1) {
                 Text(host.snapshot.displayName.isEmpty ? host.address : host.snapshot.displayName)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.body.weight(.medium))
                     .lineLimit(1)
                 Text(host.statusText)
-                    .font(.system(size: 9.5))
+                    .font(.caption)
                     .foregroundStyle(Theme.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if let cpu = host.snapshot.gauge("cpu_usage") {
+            if host.isOnline, let cpu = host.snapshot.gauge("cpu_usage") {
                 Text(String(format: "%.0f%%", cpu.value))
-                    .font(Theme.value(9.5, weight: .regular))
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(cpu.color)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 }
 
@@ -284,6 +287,9 @@ struct SidebarRow: View {
 struct StatusOverview: View {
     @EnvironmentObject private var model: CoreModel
     @Binding var showingAddHost: Bool
+    #if os(iOS)
+        @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
 
     var body: some View {
         ScrollView {
@@ -296,8 +302,7 @@ struct StatusOverview: View {
                     spacing: 12
                 ) {
                     ForEach(model.hosts) { host in
-                        HostCard(host: host)
-                            .onTapGesture { model.selection = host.id }
+                        hostLink(host)
                     }
                 }
                 .padding(14)
@@ -305,6 +310,25 @@ struct StatusOverview: View {
         }
         .background(Theme.background)
         .navigationTitle("Status")
+    }
+
+    @ViewBuilder
+    private func hostLink(_ host: Host) -> some View {
+        #if os(iOS)
+            if sizeClass == .compact {
+                NavigationLink(value: host.id) { HostCard(host: host) }
+                    .buttonStyle(.plain)
+            } else {
+                hostButton(host)
+            }
+        #else
+            hostButton(host)
+        #endif
+    }
+
+    private func hostButton(_ host: Host) -> some View {
+        Button { model.selection = host.id } label: { HostCard(host: host) }
+            .buttonStyle(.plain)
     }
 }
 
@@ -332,10 +356,15 @@ struct HostCard: View {
                 }
             }
 
-            if snapshot.gauges.isEmpty {
+            if snapshot.gauges.isEmpty || !host.isOnline {
                 HStack {
-                    ProgressView().controlSize(.small)
-                    Text(host.statusText)
+                    if snapshot.health.level == "checking" {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: HealthStyle.icon(snapshot.health.level))
+                            .foregroundStyle(Theme.level(snapshot.health.level))
+                    }
+                    Text(snapshot.health.headline)
                         .font(.system(size: 10.5))
                         .foregroundStyle(Theme.secondary)
                         .lineLimit(2)
@@ -403,10 +432,9 @@ struct MiniStat: View {
                     .font(Theme.value(9.5, weight: .medium))
                     .foregroundStyle(Theme.primary)
             }
-            CapacityBar(
-                fraction: gauge.fraction ?? 0,
-                color: gauge.color,
-                height: 4)
+            if let fraction = gauge.fraction {
+                CapacityBar(fraction: fraction, color: gauge.color, height: 4)
+            }
         }
     }
 }

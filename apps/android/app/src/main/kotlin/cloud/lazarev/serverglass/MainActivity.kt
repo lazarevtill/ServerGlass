@@ -39,8 +39,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val demoHost = intent?.getStringExtra("host")
-        val demoKey = intent?.getStringExtra("key")
+        // This activity is exported for the launcher. Production builds must not let another
+        // app turn test intent extras into automatic SSH connections using local key files.
+        val debugging = applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
+        val demoHost = if (debugging) intent?.getStringExtra("host") else null
+        val demoKey = if (debugging) intent?.getStringExtra("key") else null
 
         setContent {
             MaterialTheme(
@@ -76,6 +79,18 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
 @Composable
 fun App(model: CoreModel = viewModel(), demoHost: String? = null, demoKey: String? = null) {
+    model.lastError?.let { message ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { model.lastError = null },
+            title = { androidx.compose.material3.Text("Could not complete that action") },
+            text = { androidx.compose.material3.Text(message) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { model.lastError = null }) {
+                    androidx.compose.material3.Text("OK")
+                }
+            },
+        )
+    }
     LaunchedEffect(demoHost) {
         if (demoHost != null) model.addDemoHost(demoHost, demoKey)
     }

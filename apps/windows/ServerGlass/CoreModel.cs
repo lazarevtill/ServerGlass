@@ -31,6 +31,7 @@ internal sealed class Host : INotifyPropertyChanged
             Raise();
             Raise(nameof(Title));
             Raise(nameof(Subtitle));
+            Raise(nameof(StatusLevel));
         }
     }
 
@@ -213,27 +214,39 @@ internal sealed class CoreModel : IDisposable
 
     private async Task PollForever(CancellationToken token)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1000));
-        while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+        try
         {
-            // The list is only mutated on the UI thread, so a copy is enough to iterate safely.
-            var hosts = Hosts.ToArray();
-            foreach (var host in hosts)
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1000));
+            while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
             {
-                TargetSnapshot snapshot;
-                try
+                // Copy on the thread that owns the ObservableCollection. ToArray on a worker still
+                // enumerates concurrently with Add/Remove and used to silently kill this poll task.
+                var copy = new TaskCompletionSource<Host[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+                if (!_dispatcher.TryEnqueue(() => copy.TrySetResult(Hosts.ToArray()))) return;
+                var hosts = await copy.Task.WaitAsync(token).ConfigureAwait(false);
+                foreach (var host in hosts)
                 {
-                    snapshot = _core.Snapshot(host.TargetId);
-                }
-                catch (SgException)
-                {
-                    // The target was removed between the copy and the call. Nothing to draw.
-                    continue;
-                }
+                    TargetSnapshot snapshot;
+                    try
+                    {
+                        snapshot = _core.Snapshot(host.TargetId);
+                    }
+                    catch (SgException)
+                    {
+                        // The target was removed between the copy and the call. Nothing to draw.
+                        continue;
+                    }
 
-                _dispatcher.TryEnqueue(() => host.Snapshot = snapshot);
+                    _dispatcher.TryEnqueue(() =>
+                    {
+                        if (!token.IsCancellationRequested && Hosts.Contains(host)) host.Snapshot = snapshot;
+                    });
+                }
             }
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (ObjectDisposedException) when (token.IsCancellationRequested) { }
+        catch (Exception error) { Report($"Live updates stopped: {error.Message}"); }
     }
 
     public void Dispose()

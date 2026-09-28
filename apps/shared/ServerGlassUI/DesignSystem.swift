@@ -21,20 +21,19 @@ enum Theme {
     /// Slightly lifted from `panel`, for the simple view's larger cards. A single flat surface
     /// colour across every size makes big cards look like empty space.
     static let card = Color(red: 0.098, green: 0.098, blue: 0.114)
-    static let panelBorder = Color.white.opacity(0.06)
+    static let panelBorder = Color.white.opacity(0.10)
     static let inset = Color.black.opacity(0.25)
     static let track = Color.white.opacity(0.08)
 
     static let primary = Color.white.opacity(0.92)
-    static let secondary = Color.white.opacity(0.45)
-    static let tertiary = Color.white.opacity(0.28)
+    static let secondary = Color.white.opacity(0.72)
+    static let tertiary = Color.white.opacity(0.55)
 
     static let good = Color(red: 0.35, green: 0.84, blue: 0.55)
     static let warn = Color(red: 0.98, green: 0.75, blue: 0.28)
     static let bad = Color(red: 0.97, green: 0.44, blue: 0.44)
     static let info = Color(red: 0.42, green: 0.66, blue: 0.97)
 
-    /// Green below 60 %, amber to 85 %, red above — applied only where a fraction is real.
     /// Colour for a level the core assigned — to a host's health, a reading, or a process.
     ///
     /// The thresholds behind these levels used to live here *and* in Compose, and had already
@@ -113,7 +112,7 @@ struct Panel<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(title.uppercased())
-                    .font(Theme.label(9.5))
+                    .font(Theme.label(11))
                     .tracking(0.8)
                     .foregroundStyle(Theme.secondary)
                 if let subtitle {

@@ -1,12 +1,11 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "cloud.lazarev.serverglass"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "cloud.lazarev.serverglass"
@@ -42,18 +41,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
     }
 
     sourceSets["main"].apply {
         // The Rust .so, placed here by cargo-ndk via scripts/build-android.sh.
-        jniLibs.srcDir("src/main/jniLibs")
+        jniLibs.directories.add("src/main/jniLibs")
         // The generated UniFFI bindings, kept out of the hand-written source tree.
-        java.srcDir("build/generated/uniffi")
+        kotlin.directories.add("build/generated/uniffi")
     }
 
     packaging {

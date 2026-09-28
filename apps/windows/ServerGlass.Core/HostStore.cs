@@ -51,6 +51,7 @@ public sealed class HostStore
     };
 
     private readonly ISecretStore _secrets;
+    private bool _loadFailed;
 
     public HostStore(ISecretStore secrets, string? directory = null)
     {
@@ -83,18 +84,22 @@ public sealed class HostStore
     {
         if (!File.Exists(HostsPath))
         {
+            _loadFailed = false;
             return [];
         }
 
         try
         {
-            return JsonSerializer.Deserialize<List<SavedHost>>(File.ReadAllText(HostsPath), FileJson)
-                   ?? [];
+            var hosts = JsonSerializer.Deserialize<List<SavedHost>>(File.ReadAllText(HostsPath), FileJson)
+                   ?? throw new JsonException("The server list is null.");
+            _loadFailed = false;
+            return hosts;
         }
-        catch (Exception error) when (error is JsonException or IOException)
+        catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)
         {
             // A corrupt or unreadable list must not stop the app from starting. It is reported
             // rather than swallowed, because a discarded error is a silent failure.
+            _loadFailed = true;
             LoadFailed?.Invoke(this, error);
             return [];
         }
@@ -105,6 +110,8 @@ public sealed class HostStore
 
     public void Save(IReadOnlyList<SavedHost> hosts)
     {
+        if (_loadFailed)
+            throw new InvalidOperationException("The unreadable server list has been kept unchanged. Repair it before saving changes.");
         System.IO.Directory.CreateDirectory(Directory);
         // Written to a temporary file and moved into place, so a crash mid-write cannot leave a
         // half-written list where a complete one used to be.

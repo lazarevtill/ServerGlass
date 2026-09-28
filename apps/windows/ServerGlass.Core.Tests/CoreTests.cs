@@ -22,6 +22,29 @@ namespace ServerGlass.Core.Tests;
 /// </remarks>
 public sealed class CoreTests
 {
+    [Fact]
+    public async Task Disposing_during_native_calls_does_not_free_an_in_use_handle()
+    {
+        var core = new ServerGlassCore();
+        using var started = new ManualResetEventSlim();
+        var calls = Task.Run(() =>
+        {
+            for (var i = 0; i < 10_000; i++)
+            {
+                try
+                {
+                    core.TargetIds();
+                    started.Set();
+                }
+                catch (ObjectDisposedException) { return; }
+            }
+        });
+        Assert.True(started.Wait(TimeSpan.FromSeconds(5)));
+        core.Dispose();
+        await calls;
+        Assert.Throws<ObjectDisposedException>(() => core.TargetIds());
+    }
+
     private static TargetConfig Sample(string host = "example.test") => new()
     {
         Host = host,

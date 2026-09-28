@@ -31,7 +31,7 @@ struct SimpleHostView: View {
                     HealthCard(health: snapshot.health, name: displayName)
 
                     if snapshot.simpleTiles.isEmpty {
-                        loading
+                        if snapshot.health.level == "checking" && snapshot.state != .idle { loading }
                     } else {
                         // Always one row. An adaptive grid wrapped 3 tiles as 2 + 1, leaving a
                         // hole beside the last one; a fixed three columns with a ring sized to
@@ -93,8 +93,7 @@ struct SimpleHostView: View {
                         Spacer(minLength: 8)
                         Text(String(format: "%.0f%%", process.cpuPercent))
                             .font(Theme.value(13, weight: .medium))
-                            .foregroundStyle(
-                                process.cpuPercent >= 50 ? Theme.warn : Theme.secondary)
+                            .foregroundStyle(Theme.level(process.severity))
                     }
                     .padding(.vertical, 9)
                     if process.pid != shown.last?.pid {
@@ -239,8 +238,8 @@ struct SimpleTileCard: View {
 
             ZStack {
                 let stroke = ring > 90 ? 8.0 : 6.0
-                Circle().stroke(Theme.track, lineWidth: stroke)
                 if let fraction = tile.fraction {
+                    Circle().stroke(Theme.track, lineWidth: stroke)
                     Circle()
                         .trim(from: 0, to: fraction)
                         .stroke(tint, style: StrokeStyle(lineWidth: stroke, lineCap: .round))
@@ -277,5 +276,8 @@ struct SimpleTileCard: View {
         .frame(maxWidth: .infinity)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.panelBorder))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(tile.name)
+        .accessibilityValue("\(tile.valueText), \(tile.summary)")
     }
 }
