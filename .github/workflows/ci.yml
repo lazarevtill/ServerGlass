@@ -44,9 +44,16 @@ jobs:
 
   macos-app:
     name: macOS app and native bridge
-    runs-on: macos-14
+    # The macOS 14 runner defaults to Swift 5.10; the package requires Swift 6.
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@v7
+      - name: Show the Apple toolchain
+        run: |
+          xcodebuild -version
+          swift --version
       - name: Install Rust
         run: |
           rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
