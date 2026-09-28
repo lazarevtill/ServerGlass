@@ -63,8 +63,8 @@ device-local credentials, and shared Rust formatting/severity decisions.
   physical iOS device were not exercised.
 - This pass is not proof that the repository contains no remaining bugs. It does not establish
   accessibility conformance, long-duration stability or an exhaustive security audit.
-- Changes and build artifacts are local. The existing app in `/Applications` was not replaced,
-  and no release was published.
+- Build artifacts remain local. The existing app in `/Applications` was not replaced,
+  and no release was published. Review and CI status are tracked in the branch's pull request.
 
 Useful local outputs are `target/ServerGlass.app`, the iOS simulator app under
 `target/ios/DerivedData/Build/Products/Debug-iphonesimulator`, and
