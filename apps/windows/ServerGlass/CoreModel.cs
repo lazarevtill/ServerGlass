@@ -133,6 +133,9 @@ internal sealed class CoreModel : IDisposable
 
     public Host Add(SavedHost saved, string? secret, string? keyText)
     {
+        // Saving can be forbidden after a failed restore. Refuse before writing credentials or
+        // adopting a live target, otherwise a reported failure still starts an unsaved server.
+        Store.EnsureInventoryReadable();
         // Secrets first: the config handed to the core is built from them, and a storage refusal
         // must be reported as a storage refusal rather than as a sign-in failure a screen later.
         if (!string.IsNullOrEmpty(secret) && !Store.SetSecret(saved.Id, secret))
@@ -155,6 +158,7 @@ internal sealed class CoreModel : IDisposable
 
     public void Remove(Host host)
     {
+        Store.EnsureInventoryReadable();
         _core.RemoveTarget(host.TargetId);
         Store.Forget(host.Saved);
         Hosts.Remove(host);

@@ -54,11 +54,24 @@ device-local credentials, and shared Rust formatting/severity decisions.
 | Android | Built the arm64 debug APK; all 9 JVM tests passed; installed and launched on the foldable emulator with no recorded crash. This was a fixture launch, not a complete interactive Android UI test. |
 | Linux | Built in a Rust 1.89 Debian container with GTK/libadwaita; format and Clippy passed with warnings denied; 24 unit tests and 4 live engine tests passed. |
 | Windows bridge | Built the .NET projects and passed 24 tests against the real native library on macOS, including concurrent disposal. DPAPI tests were excluded because they require Windows. |
-| CI configuration | Added the macOS packaging/bridge job and required live fixtures for Linux jobs; YAML parses locally. The updated workflow has not yet run on GitHub. |
+| CI configuration | Added the macOS packaging/bridge job and required live fixtures for Linux jobs. Current results are tracked in [PR #9](https://github.com/lazarevtill/ServerGlass/pull/9). |
+
+## PR review follow-up
+
+The automated review identified a Windows add-host failure that occurred after credentials and
+the live target were already created. Inventory rejection now happens before either mutation;
+storage tests verify that existing secrets are preserved, new secrets are refused, and edits
+resume after a repaired inventory is loaded. The local C# bridge suite now contains 25 passing tests.
+
+GitHub's initial Windows job also passed the WinUI build and all 35 tests, including DPAPI.
+CI exposed two portability issues: the macOS runner selected Swift 5.10, so the job now selects
+Xcode 16.4 on macOS 15; a pairing test closed its mock socket with unread request bytes, which
+Windows reset before returning the deliberately wrong key. The mock now reads the handshake
+before replying, retaining the key-mismatch assertion. Latest-head results are in the PR.
 
 ## Limits and release follow-up
 
-- WinUI build/launch, Windows installation and DPAPI must still be verified on Windows.
+- Windows application launch and installation still need interactive verification.
 - Linux desktop rendering and complete Android interaction need native UI testing. An iPad and
   physical iOS device were not exercised.
 - This pass is not proof that the repository contains no remaining bugs. It does not establish

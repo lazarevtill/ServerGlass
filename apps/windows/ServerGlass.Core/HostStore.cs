@@ -108,10 +108,16 @@ public sealed class HostStore
     /// <summary>Raised when the saved list could not be read. The app shows it; it is not fatal.</summary>
     public event EventHandler<Exception>? LoadFailed;
 
-    public void Save(IReadOnlyList<SavedHost> hosts)
+    /// <summary>Reject an edit before its caller changes credentials or live targets.</summary>
+    public void EnsureInventoryReadable()
     {
         if (_loadFailed)
             throw new InvalidOperationException("The unreadable server list has been kept unchanged. Repair it before saving changes.");
+    }
+
+    public void Save(IReadOnlyList<SavedHost> hosts)
+    {
+        EnsureInventoryReadable();
         System.IO.Directory.CreateDirectory(Directory);
         // Written to a temporary file and moved into place, so a crash mid-write cannot leave a
         // half-written list where a complete one used to be.
@@ -124,11 +130,18 @@ public sealed class HostStore
         _secrets.Get(hostId, kind);
 
     /// <returns><c>false</c> when the credential store refused to keep the secret.</returns>
-    public bool SetSecret(string hostId, string? secret, SecretKind kind = SecretKind.Password) =>
-        _secrets.Set(hostId, kind, secret);
+    public bool SetSecret(string hostId, string? secret, SecretKind kind = SecretKind.Password)
+    {
+        EnsureInventoryReadable();
+        return _secrets.Set(hostId, kind, secret);
+    }
 
     /// <summary>Erase everything secret belonging to a host.</summary>
-    public void Forget(SavedHost host) => _secrets.Forget(host.Id);
+    public void Forget(SavedHost host)
+    {
+        EnsureInventoryReadable();
+        _secrets.Forget(host.Id);
+    }
 
     /// <summary>
     /// Build the config the core wants, pulling the secret out of the credential store at the last

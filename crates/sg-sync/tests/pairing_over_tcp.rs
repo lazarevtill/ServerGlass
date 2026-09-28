@@ -61,19 +61,23 @@ async fn a_listener_that_never_completes_the_handshake_does_not_block_later_addr
 
 #[tokio::test]
 async fn a_device_with_a_different_key_than_the_qr_is_rejected() {
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let impostor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let (_, offer) =
         sg_sync::pairing::Handshake::offering(vec![impostor.local_addr().unwrap().to_string()]);
     let answering = tokio::spawn(async move {
         let (mut stream, _) = impostor.accept().await.unwrap();
+        // Read the client's handshake before closing. Windows resets a socket closed with
+        // unread request bytes, hiding the deliberately wrong key behind a transport error.
+        let mut client_key = [0; 32];
+        stream.read_exact(&mut client_key).await.unwrap();
         stream.write_all(&[1; 32]).await.unwrap();
     });
     let error = send_transfer(&offer)
         .await
         .err()
         .expect("mismatched QR key accepted");
-    assert!(error.to_string().contains("does not match"));
+    assert!(error.to_string().contains("does not match"), "{error}");
     answering.await.unwrap();
 }
 
