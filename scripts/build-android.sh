@@ -7,7 +7,7 @@
 # Prerequisites, all installed into user space with no sudo:
 #   brew install openjdk@21 gradle
 #   brew install --cask android-commandlinetools
-#   sdkmanager platform-tools "platforms;android-35" "build-tools;36.1.0" \
+#   sdkmanager platform-tools "platforms;android-37" "build-tools;36.1.0" \
 #              "ndk;27.3.13750724" emulator "system-images;android-36;google_apis;arm64-v8a"
 #   cargo install cargo-ndk && rustup target add aarch64-linux-android
 set -euo pipefail

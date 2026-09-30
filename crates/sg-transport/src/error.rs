@@ -25,6 +25,12 @@ pub enum TransportError {
         fingerprint: String,
     },
 
+    #[error("could not read or save this server's trusted identity: {detail}")]
+    HostKeyStorage { detail: String },
+
+    #[error("the server's response exceeded the {limit}-byte output limit")]
+    OutputTooLarge { limit: usize },
+
     #[error("authentication failed for {user}@{host}")]
     AuthFailed { user: String, host: String },
 
@@ -74,6 +80,8 @@ impl TransportError {
             TransportError::AuthFailed { .. }
             | TransportError::UnknownHostKey { .. }
             | TransportError::HostKeyMismatch { .. }
+            | TransportError::HostKeyStorage { .. }
+            | TransportError::OutputTooLarge { .. }
             | TransportError::KeyFile { .. }
             | TransportError::KeyText { .. }
             | TransportError::NoAgent(_)

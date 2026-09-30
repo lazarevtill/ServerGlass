@@ -199,7 +199,7 @@ impl Window {
                 dialogs::report_problem(
                     &window,
                     "Your server list could not be read",
-                    &format!("{problem}\n\nNothing has been overwritten. Adding a server now would replace the file."),
+                    &format!("{problem}\n\nNothing has been overwritten. Repair the file before saving changes."),
                 );
             });
         }

@@ -49,6 +49,12 @@ impl RateEngine {
         let by_id: HashMap<&SeriesId, &SeriesDescriptor> =
             descriptors.iter().map(|d| (&d.id, d)).collect();
 
+        // Process IDs and interface names churn for the entire lifetime of a connection. The
+        // chart store was bounded but these baselines were not, and a reused PID inherited the
+        // previous process's CPU counter. An absent series must establish a new baseline.
+        self.previous
+            .retain(|id, _| by_id.get(id).is_some_and(|d| d.kind == SeriesKind::Counter));
+
         let mut out = Vec::with_capacity(samples.len());
         for sample in samples {
             let Some(descriptor) = by_id.get(&sample.series) else {
@@ -73,7 +79,7 @@ impl RateEngine {
             );
 
             let Some(previous) = previous else { continue };
-            let elapsed_ms = sample.at_ms - previous.at_ms;
+            let elapsed_ms = sample.at_ms.saturating_sub(previous.at_ms);
             if elapsed_ms <= 0 || raw < previous.raw {
                 continue;
             }
@@ -122,6 +128,31 @@ mod tests {
 
     fn sample(descriptor: &SeriesDescriptor, at_ms: i64, value: u64) -> Sample {
         Sample::new(descriptor.id.clone(), at_ms, value)
+    }
+
+    #[test]
+    fn churn_discards_old_counters_and_reused_ids_start_fresh() {
+        let mut engine = RateEngine::new();
+        let first = counter("process-0", Unit::Percent, 1.0);
+        for index in 0..1_000 {
+            let d = counter(&format!("process-{index}"), Unit::Percent, 1.0);
+            let out = engine.process(
+                std::slice::from_ref(&d),
+                vec![sample(&d, index * 1000, 100)],
+            );
+            assert!(out.is_empty());
+            assert_eq!(engine.tracked(), 1);
+        }
+        let out = engine.process(
+            std::slice::from_ref(&first),
+            vec![sample(&first, 1_000_000, 200)],
+        );
+        assert!(
+            out.is_empty(),
+            "a reused process ID inherited an old counter"
+        );
+        engine.process(&[], vec![]);
+        assert_eq!(engine.tracked(), 0);
     }
 
     #[test]

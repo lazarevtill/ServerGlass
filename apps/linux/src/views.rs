@@ -80,11 +80,8 @@ impl SimpleView {
         detail.add_css_class("sg-tile-summary");
         detail.set_xalign(0.0);
         detail.set_wrap(true);
-        // Two lines reserved whether or not both are needed, so "Barely working" and a full
-        // sentence about free space produce cards of the same height and the tiles below them do
-        // not jump on every refresh.
-        detail.set_lines(2);
-        detail.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        // Failure details contain the recovery step. Let them wrap instead of hiding it behind
+        // an ellipsis, especially with larger system text or a narrow window.
 
         card.append(&headline);
         card.append(&detail);

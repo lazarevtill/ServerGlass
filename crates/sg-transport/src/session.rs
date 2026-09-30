@@ -13,7 +13,7 @@ use russh::keys::agent::client::AgentClient;
 use russh::keys::{decode_secret_key, load_secret_key, PrivateKeyWithHashAlg};
 use russh::{ChannelMsg, Disconnect};
 use sg_model::{Request, Responses};
-use tokio::time::timeout;
+use tokio::time::{timeout, timeout_at, Instant};
 
 use crate::auth::{Auth, ConnectionSpec, HostKeyPolicy};
 use crate::error::{Result, TransportError};
@@ -24,9 +24,8 @@ use crate::frame::Framing;
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum HostKeyVerdict {
     Accepted,
-    /// Trusted as asked, but the key could not be written down — so the next connection has
-    /// nothing to compare against and would trust a different key just as readily.
-    AcceptedUnrecorded {
+    /// Verification cannot be completed safely if the pin store cannot be read or written.
+    StorageFailed {
         detail: String,
     },
     Unknown {
@@ -50,8 +49,11 @@ impl client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::keys::ssh_key::PublicKey,
+        server_key: &russh::keys::PublicKeyOrCertificate,
     ) -> std::result::Result<bool, Self::Error> {
+        // Pin the leaf key, including when it is carried by a certificate. We do not implicitly
+        // trust a certificate authority or change the application's existing pinning policy.
+        let server_public_key = &server_key.public_key();
         let fingerprint = server_public_key
             .fingerprint(russh::keys::HashAlg::Sha256)
             .to_string();
@@ -61,33 +63,49 @@ impl client::Handler for ClientHandler {
             return Ok(true);
         }
 
-        let known = match &self.known_hosts {
-            Some(path) => {
-                russh::keys::check_known_hosts_path(&self.host, self.port, server_public_key, path)
-            }
-            None => russh::keys::check_known_hosts(&self.host, self.port, server_public_key),
+        let path = self
+            .known_hosts
+            .clone()
+            .or_else(|| std::env::home_dir().map(|home| home.join(".ssh/known_hosts")));
+        let Some(path) = path else {
+            self.record(HostKeyVerdict::StorageFailed {
+                detail: "No home directory for known_hosts.".into(),
+            });
+            return Ok(false);
         };
+        // russh treats *any* open failure as an unknown host. Only a missing file means first
+        // use; a permission failure must not silently downgrade an existing pin. Serialise the
+        // read/learn pair so simultaneous connections cannot race to trust two different keys.
+        static PIN_STORE: Mutex<()> = Mutex::new(());
+        let _guard = PIN_STORE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Err(error) = std::fs::File::open(&path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                self.record(HostKeyVerdict::StorageFailed {
+                    detail: error.to_string(),
+                });
+                return Ok(false);
+            }
+        }
+        let known =
+            russh::keys::check_known_hosts_path(&self.host, self.port, server_public_key, &path);
         let verdict = match known {
             Ok(true) => HostKeyVerdict::Accepted,
             // A key recorded for this host that does not match the one presented. Never
             // acceptable under any policy — this is the case host key checking exists for.
             Err(russh::keys::Error::KeyChanged { .. }) => HostKeyVerdict::Changed { fingerprint },
-            Ok(false) | Err(_) => {
+            Err(error) => HostKeyVerdict::StorageFailed {
+                detail: error.to_string(),
+            },
+            Ok(false) => {
                 if self.policy == HostKeyPolicy::AcceptNew {
-                    if let Err(error) = learn(
-                        &self.host,
-                        self.port,
-                        server_public_key,
-                        self.known_hosts.as_deref(),
-                    ) {
-                        // Accept anyway — the user asked to trust this host — but say that the
-                        // key was not recorded, because "trusted on first use" with nothing
-                        // written down means *every* connection is a first use, and the next one
-                        // would accept a different key just as readily.
-                        self.record(HostKeyVerdict::AcceptedUnrecorded {
+                    if let Err(error) = learn(&self.host, self.port, server_public_key, &path) {
+                        // Do not send credentials until the promised pin is durable.
+                        self.record(HostKeyVerdict::StorageFailed {
                             detail: error.to_string(),
                         });
-                        return Ok(true);
+                        return Ok(false);
                     }
                     HostKeyVerdict::Accepted
                 } else {
@@ -102,48 +120,31 @@ impl client::Handler for ClientHandler {
     }
 }
 
-/// Record a host key, creating the directory it lives in.
-///
-/// `learn_known_hosts` writes to `~/.ssh/known_hosts` and does not create `~/.ssh`. On a desktop
-/// that directory is always there; in an app sandbox it is not, so on Android and iOS the write
-/// failed every time — and the failure was discarded. The apps offered "remember its identity the
-/// first time you connect", recorded nothing, and then accepted whatever key was presented on
-/// every subsequent connection, which is the exact attack host-key checking exists to stop.
+/// Record a host key, creating its directory without changing permissions on an existing one.
 fn learn(
     host: &str,
     port: u16,
     key: &russh::keys::PublicKey,
-    known_hosts: Option<&std::path::Path>,
+    known_hosts: &std::path::Path,
 ) -> std::result::Result<(), std::io::Error> {
-    let directory = match known_hosts {
-        Some(path) => path.parent().map(std::path::Path::to_path_buf),
-        // Nothing configured: the desktop case, where `~/.ssh` is what russh will use. Windows
-        // has no `HOME` — it has `USERPROFILE` — and looking only at the former would have skipped
-        // creating the directory there, reintroducing on Windows exactly the silent failure this
-        // function exists to fix.
-        None => std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(|home| std::path::Path::new(&home).join(".ssh")),
-    };
-
-    if let Some(directory) = directory {
-        // `learn_known_hosts` writes the file but will not create the directory holding it, which
-        // is why this failed in an app sandbox where nothing had made one.
-        std::fs::create_dir_all(&directory)?;
-        // 0700: a known_hosts file is not secret, but the directory it shares with private keys
-        // should not be readable by anything else on a multi-user box.
+    if let Some(directory) = known_hosts
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        let existed = directory.exists();
+        std::fs::create_dir_all(directory)?;
+        // A caller may keep pins in an existing shared directory. chmod on that directory would
+        // change permissions for unrelated files (even /tmp), so only secure directories we made.
         #[cfg(unix)]
-        {
+        if !existed {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700));
+            std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
         }
+        #[cfg(not(unix))]
+        let _ = existed;
     }
-
-    match known_hosts {
-        Some(path) => russh::keys::known_hosts::learn_known_hosts_path(host, port, key, path),
-        None => russh::keys::known_hosts::learn_known_hosts(host, port, key),
-    }
-    .map_err(|e| std::io::Error::other(e.to_string()))
+    russh::keys::known_hosts::learn_known_hosts_path(host, port, key, known_hosts)
+        .map_err(|error| std::io::Error::other(error.to_string()))
 }
 
 impl ClientHandler {
@@ -212,21 +213,31 @@ impl SshSession {
                                 fingerprint,
                             }
                         }
+                        Some(HostKeyVerdict::StorageFailed { detail }) => {
+                            TransportError::HostKeyStorage { detail }
+                        }
                         _ => TransportError::Ssh(err),
                     });
                 }
             };
 
-        authenticate(&mut handle, &spec).await?;
-
-        let channel = handle.channel_open_session().await?;
-        // No PTY, deliberately. A PTY would echo the script back into the output stream and
-        // translate LF to CRLF, corrupting every payload we parse.
-        //
-        // `/bin/sh` rather than the login shell: the user's shell might be fish or csh, whose
-        // syntax our batch script is not written in. Executing sh explicitly makes the protocol
-        // independent of whatever the account happens to be configured with.
-        channel.exec(true, "/bin/sh").await?;
+        let channel = timeout(Duration::from_millis(spec.connect_timeout_ms), async {
+            authenticate(&mut handle, &spec).await?;
+            let channel = handle.channel_open_session().await?;
+            // No PTY, deliberately. A PTY would echo the script back into the output stream and
+            // translate LF to CRLF, corrupting every payload we parse.
+            //
+            // `/bin/sh` rather than the login shell: the user's shell might be fish or csh, whose
+            // syntax our batch script is not written in. Executing sh explicitly makes the protocol
+            // independent of whatever the account happens to be configured with.
+            channel.exec(true, "/bin/sh").await?;
+            Ok::<_, TransportError>(channel)
+        })
+        .await
+        .map_err(|_| TransportError::Timeout {
+            what: "authentication and shell startup",
+            ms: spec.connect_timeout_ms,
+        })??;
 
         let mut session = SshSession {
             spec,
@@ -255,14 +266,21 @@ impl SshSession {
         }
 
         self.round_trips += 1;
-        self.raw_write(&script).await?;
+        // One absolute deadline, including the write. Resetting a relative timeout for every
+        // packet lets a streaming command run forever and grow the buffer without bound.
+        let deadline = Instant::now() + Duration::from_millis(self.spec.batch_timeout_ms);
+        timeout_at(deadline, self.raw_write(&script))
+            .await
+            .map_err(|_| TransportError::Timeout {
+                what: "collection batch",
+                ms: self.spec.batch_timeout_ms,
+            })??;
 
         let terminator = self.framing.terminator();
-        let deadline = Duration::from_millis(self.spec.batch_timeout_ms);
         let mut buf: Vec<u8> = Vec::with_capacity(16 * 1024);
 
         loop {
-            match timeout(deadline, self.channel.wait()).await {
+            match timeout_at(deadline, self.channel.wait()).await {
                 Err(_) => {
                     return Err(TransportError::Timeout {
                         what: "collection batch",
@@ -272,6 +290,12 @@ impl SshSession {
                 Ok(None) => return Err(TransportError::Closed),
                 Ok(Some(msg)) => match msg {
                     ChannelMsg::Data { ref data } => {
+                        const MAX_BATCH_BYTES: usize = 16 * 1024 * 1024;
+                        if data.len() > MAX_BATCH_BYTES.saturating_sub(buf.len()) {
+                            return Err(TransportError::OutputTooLarge {
+                                limit: MAX_BATCH_BYTES,
+                            });
+                        }
                         buf.extend_from_slice(data);
                         // Search only the tail: the terminator cannot straddle more than its own
                         // length, and rescanning a megabyte of process table every chunk is

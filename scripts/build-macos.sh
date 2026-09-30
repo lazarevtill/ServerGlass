@@ -8,8 +8,16 @@
 # the compiled library's metadata, not the source.
 set -euo pipefail
 
+# Applies to Rust's C/assembly dependencies too. Otherwise a newer Xcode quietly compiles the
+# bundled crypto library for the build machine's OS, above the app's advertised minimum.
+export MACOSX_DEPLOYMENT_TARGET=14.0
+
 cd "$(dirname "$0")/.."
 PROFILE="${1:-debug}"
+case "$PROFILE" in
+    debug|release) ;;
+    *) echo "usage: $0 [debug|release]" >&2; exit 1 ;;
+esac
 # The path `apps/Package.swift` actually consumes. It used to point under `apps/macos/`, which
 # nothing reads: the macOS build then compiled the UI against whatever bindings were last written
 # by `build-ios.sh`, so a change to the FFI surface reached iOS and silently did not reach macOS.
@@ -52,6 +60,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "apps/.build/$PROFILE/ServerGlass" "$APP/Contents/MacOS/ServerGlass"
 
+# An installed bundle must never load a core from a development checkout. That can trap in
+# addTarget after the checkout's dylib is rebuilt with a different UniFFI record layout.
+if otool -L "$APP/Contents/MacOS/ServerGlass" | grep 'libsg_ffi' >/dev/null; then
+    echo "error: ServerGlass still dynamically links the Rust core" >&2
+    exit 1
+fi
+
 # The icon is generated from source (scripts/make-icons.swift) rather than committed as binaries.
 echo "==> icon"
 swift scripts/make-icons.swift >/dev/null
@@ -75,5 +90,11 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+VERSION=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+
+codesign --force --sign - "$APP"
+codesign --verify --strict "$APP"
 
 echo "built: $APP"

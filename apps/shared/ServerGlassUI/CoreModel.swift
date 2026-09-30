@@ -100,6 +100,7 @@ public final class CoreModel: ObservableObject {
     }
 
     /// Register a host and start polling it.
+    @discardableResult
     public func addHost(
         address: String,
         port: UInt16,
@@ -113,29 +114,32 @@ public final class CoreModel: ObservableObject {
         /// False for the development demo host, which would otherwise accumulate a duplicate
         /// saved record on every launch.
         persist: Bool = true
-    ) {
+    ) -> Bool {
         let saved = HostStore.SavedHost(
             address: address, port: port, user: user, authKind: authKind,
             keyPath: keyPath?.isEmpty == true ? nil : keyPath,
             hostKeyPolicy: hostKeyPolicy, refreshMs: refreshMs)
 
         if persist {
+            guard var stored = loadSavedHosts() else { return false }
             // Secrets go to the Keychain and nowhere else; the saved record never carries them.
             // A refusal is reported here rather than becoming a confusing connection error later.
-            if !Keychain.setSecret(secret, for: saved.id)
-                || !Keychain.setSecret(keyText, for: saved.id, kind: .keyText)
+            if (secret != nil && !Keychain.setSecret(secret, for: saved.id))
+                || (keyText != nil && !Keychain.setSecret(keyText, for: saved.id, kind: .keyText))
             {
                 lastError = Self.keychainRefused
+                HostStore.forget(saved)
+                return false
             }
-            var stored = HostStore.load()
             stored.append(saved)
             HostStore.save(stored)
         } else {
             // Not persisted, so the secret has to travel with the config rather than the Keychain.
-            ephemeralSecrets[saved.id] = secret
+            ephemeralSecrets[saved.id] = (secret, keyText)
         }
 
         start(saved)
+        return true
     }
 
     /// Change a saved host and reconnect it with the new settings.
@@ -149,6 +153,7 @@ public final class CoreModel: ObservableObject {
     /// an empty string meaning "clear it". An edit sheet cannot show an existing password, so
     /// treating a blank field as a deliberate erasure would silently discard the credential of
     /// anyone who edited a port number.
+    @discardableResult
     public func updateHost(
         id: String,
         address: String,
@@ -160,24 +165,25 @@ public final class CoreModel: ObservableObject {
         secret: String?,
         hostKeyPolicy: String,
         refreshMs: UInt64
-    ) {
+    ) -> Bool {
         guard let savedId = hosts.first(where: { $0.id == id })?.savedId,
-            let index = HostStore.load().firstIndex(where: { $0.id == savedId })
-        else { return }
+            var stored = loadSavedHosts(),
+            let index = stored.firstIndex(where: { $0.id == savedId })
+        else { return false }
 
-        var stored = HostStore.load()
         stored[index] = HostStore.SavedHost(
             id: savedId, address: address, port: port, user: user, authKind: authKind,
             keyPath: keyPath?.isEmpty == true ? nil : keyPath,
             hostKeyPolicy: hostKeyPolicy, refreshMs: refreshMs)
-        HostStore.save(stored)
-
         if let secret, !Keychain.setSecret(secret, for: savedId) {
             lastError = Self.keychainRefused
+            return false
         }
         if let keyText, !Keychain.setSecret(keyText, for: savedId, kind: .keyText) {
             lastError = Self.keychainRefused
+            return false
         }
+        HostStore.save(stored)
 
         // Drop the live target and bring the record back up. Not `removeHost`, which would also
         // erase the record and its secrets — the very things being kept.
@@ -188,12 +194,13 @@ public final class CoreModel: ObservableObject {
 
         let newId = start(stored[index])
         if wasSelected { selection = newId }
+        return true
     }
 
     /// The saved record behind a live host, for populating an edit form.
     public func saved(for id: String) -> HostStore.SavedHost? {
         guard let savedId = hosts.first(where: { $0.id == id })?.savedId else { return nil }
-        return HostStore.load().first { $0.id == savedId }
+        return loadSavedHosts()?.first { $0.id == savedId }
     }
 
     static let keychainRefused =
@@ -202,14 +209,15 @@ public final class CoreModel: ObservableObject {
         + "Keychain is unavailable; use an SSH agent or a key file instead."
 
     /// Secrets for hosts that were deliberately not saved.
-    private var ephemeralSecrets: [String: String?] = [:]
+    private var ephemeralSecrets: [String: (secret: String?, keyText: String?)] = [:]
 
     /// Bring a saved host up: hand its config to the core, start polling, and show it.
     @discardableResult
     private func start(_ saved: HostStore.SavedHost) -> String {
         var config = HostStore.config(for: saved)
         if let ephemeral = ephemeralSecrets[saved.id] {
-            config.secret = ephemeral
+            config.secret = ephemeral.secret
+            config.keyText = ephemeral.keyText
         }
         let id = core.addTarget(config: config)
         do {
@@ -229,18 +237,27 @@ public final class CoreModel: ObservableObject {
 
     /// Reconnect everything that was added in a previous session.
     private func restore() {
-        for saved in HostStore.load() {
+        for saved in loadSavedHosts() ?? [] {
             start(saved)
         }
     }
 
+    private func loadSavedHosts() -> [HostStore.SavedHost]? {
+        do { return try HostStore.load() }
+        catch {
+            lastError = "The saved server list could not be read. It has been kept unchanged: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
     public func removeHost(id: String) {
+        guard var stored = loadSavedHosts() else { return }
         try? core.removeTarget(targetId: id)
 
         // Forget the stored record and its Keychain entry too, or removing a host from the list
         // would leave its password behind and the host itself would return on next launch.
         if let savedId = hosts.first(where: { $0.id == id })?.savedId {
-            var stored = HostStore.load()
+            ephemeralSecrets.removeValue(forKey: savedId)
             if let doomed = stored.first(where: { $0.id == savedId }) {
                 HostStore.forget(doomed)
             }

@@ -36,13 +36,13 @@ internal static class Theme
     public static readonly Color Background = Rgb(11, 11, 13);
     public static readonly Color Panel = Rgb(21, 21, 24);
     public static readonly Color Card = Rgb(25, 25, 29);
-    public static readonly Color PanelBorder = White(0.06);
+    public static readonly Color PanelBorder = White(0.10);
     public static readonly Color Track = White(0.08);
 
     // Text.
     public static readonly Color Primary = White(0.92);
-    public static readonly Color Secondary = White(0.45);
-    public static readonly Color Tertiary = White(0.28);
+    public static readonly Color Secondary = White(0.72);
+    public static readonly Color Tertiary = White(0.55);
 
     // Levels.
     public static readonly Color Good = Rgb(89, 214, 140);

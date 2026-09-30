@@ -167,6 +167,8 @@ public sealed class HostStoreTests : IDisposable
     public void A_corrupt_host_list_is_reported_rather_than_thrown_or_swallowed()
     {
         var store = Store();
+        var existing = Sample();
+        store.SetSecret(existing.Id, "working-password");
         Directory.CreateDirectory(_directory);
         File.WriteAllText(store.HostsPath, "{ this is not the list }");
 
@@ -175,6 +177,33 @@ public sealed class HostStoreTests : IDisposable
 
         Assert.Empty(store.Load());
         Assert.NotNull(reported);
+        Assert.Throws<InvalidOperationException>(() => store.EnsureInventoryReadable());
+        Assert.Throws<InvalidOperationException>(() => store.Save([Sample()]));
+        Assert.Throws<InvalidOperationException>(() => store.SetSecret("new-host", "new-password"));
+        Assert.Throws<InvalidOperationException>(() => store.SetSecret(existing.Id, "replacement"));
+        Assert.Throws<InvalidOperationException>(() => store.Forget(existing));
+        Assert.Null(store.Secret("new-host"));
+        Assert.Equal("working-password", store.Secret(existing.Id));
+        Assert.Equal("{ this is not the list }", File.ReadAllText(store.HostsPath));
+    }
+
+    [Fact]
+    public void A_repaired_inventory_can_be_loaded_and_edited_again()
+    {
+        var store = Store();
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(store.HostsPath, "broken");
+        Assert.Empty(store.Load());
+        Assert.Throws<InvalidOperationException>(() => store.SetSecret("new-host", "password"));
+
+        File.WriteAllText(store.HostsPath, "[]");
+        Assert.Empty(store.Load());
+        store.EnsureInventoryReadable();
+        var host = Sample();
+        Assert.True(store.SetSecret(host.Id, "password"));
+        store.Save([host]);
+        Assert.Equal(host, Assert.Single(store.Load()));
+        Assert.Equal("password", store.Secret(host.Id));
     }
 
     /// <summary>An empty store is an empty list, not a crash on first launch.</summary>

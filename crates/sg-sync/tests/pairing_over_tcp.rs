@@ -24,6 +24,75 @@ fn inventory() -> Payload {
     }
 }
 
+#[tokio::test]
+async fn pairing_listens_on_every_advertised_address_family() {
+    for host in ["127.0.0.1", "::1"] {
+        let listener = Listener::bind(&[host.into()]).await.expect("bind loopback");
+        let offer = listener.offer().clone();
+        let accepting = tokio::spawn(listener.accept());
+        let (sender, _) = send_transfer(&offer)
+            .await
+            .expect("reach advertised address");
+        let (receiver, _) = accepting.await.unwrap().unwrap();
+        assert_eq!(sender.verification_code(), receiver.verification_code());
+    }
+}
+
+#[tokio::test]
+async fn a_listener_that_never_completes_the_handshake_does_not_block_later_addresses() {
+    let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let silent_address = silent.local_addr().unwrap().to_string();
+    let listener = Listener::bind(&["127.0.0.1".into()]).await.unwrap();
+    let mut offer = listener.offer().clone();
+    offer.addresses.insert(0, silent_address);
+    let accepting = tokio::spawn(listener.accept());
+    let silence = tokio::spawn(async move {
+        let (_stream, _) = silent.accept().await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    let (session, _) = tokio::time::timeout(Duration::from_secs(8), send_transfer(&offer))
+        .await
+        .expect("a silent address blocked the valid one")
+        .unwrap();
+    let (receiver, _) = accepting.await.unwrap().unwrap();
+    assert_eq!(session.verification_code(), receiver.verification_code());
+    silence.abort();
+}
+
+#[tokio::test]
+async fn a_device_with_a_different_key_than_the_qr_is_rejected() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let impostor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (_, offer) =
+        sg_sync::pairing::Handshake::offering(vec![impostor.local_addr().unwrap().to_string()]);
+    let answering = tokio::spawn(async move {
+        let (mut stream, _) = impostor.accept().await.unwrap();
+        // Read the client's handshake before closing. Windows resets a socket closed with
+        // unread request bytes, hiding the deliberately wrong key behind a transport error.
+        let mut client_key = [0; 32];
+        stream.read_exact(&mut client_key).await.unwrap();
+        stream.write_all(&[1; 32]).await.unwrap();
+    });
+    let error = send_transfer(&offer)
+        .await
+        .err()
+        .expect("mismatched QR key accepted");
+    assert!(error.to_string().contains("does not match"), "{error}");
+    answering.await.unwrap();
+}
+
+#[tokio::test]
+async fn an_oversize_inventory_is_rejected_before_writing() {
+    let listener = Listener::bind(&["127.0.0.1".into()]).await.unwrap();
+    let offer = listener.offer().clone();
+    let accepting = tokio::spawn(listener.accept());
+    let (session, mut stream) = send_transfer(&offer).await.unwrap();
+    let _receiver = accepting.await.unwrap().unwrap();
+    assert!(write_payload(&session, &mut stream, &vec![0; 1 << 20])
+        .await
+        .is_err());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_inventory_crosses_between_two_devices() {
     // The device being set up shows the QR.

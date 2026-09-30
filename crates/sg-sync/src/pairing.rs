@@ -27,8 +27,7 @@ pub const VERSION: u8 = 1;
 
 /// How long an offer is worth showing before it should be regenerated.
 ///
-/// Not enforced by the protocol — a stale QR simply fails to connect once the listener is gone —
-/// but the UI should expire the code so a screen left unlocked on a desk is not an open door.
+/// Enforced by the listener as well as the UI so a forgotten pairing dialog cannot listen forever.
 pub const OFFER_TTL_SECS: u64 = 120;
 
 /// What the QR encodes.
@@ -74,6 +73,9 @@ impl Offer {
     pub fn decode(text: &str) -> Result<Self, SyncError> {
         let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let text = text.trim();
+        if text.len() > 4096 {
+            return Err(SyncError::Malformed("pairing code is too large".into()));
+        }
 
         let rest = text
             .strip_prefix("SG")
@@ -117,6 +119,9 @@ impl Offer {
             .collect();
         if addresses.is_empty() {
             return Err(SyncError::Malformed("no address".into()));
+        }
+        if addresses.len() > 32 {
+            return Err(SyncError::Malformed("too many pairing addresses".into()));
         }
 
         Ok(Offer {

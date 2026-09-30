@@ -47,7 +47,7 @@ internal sealed class PlainView : UserControl
         _root.Children.Add(HealthCard(snapshot.Health,
             string.IsNullOrEmpty(snapshot.DisplayName) ? address : snapshot.DisplayName));
 
-        if (snapshot.SimpleTiles.Count == 0)
+        if (snapshot.SimpleTiles.Count == 0 && snapshot.Health.Level == "checking" && snapshot.State.Kind != "idle")
         {
             _root.Children.Add(new TextBlock
             {
@@ -266,7 +266,7 @@ internal sealed class PlainView : UserControl
 
             var percent = Widgets.Value(
                 $"{Math.Round(process.CpuPercent):0}%", 13,
-                process.CpuPercent >= 50 ? Theme.Warn : Theme.Secondary);
+                Theme.Level(process.Severity));
             Grid.SetColumn(percent, 1);
 
             row.Children.Add(command);

@@ -8,6 +8,10 @@
 # and the only change is the SDK and CODE_SIGNING settings.
 set -euo pipefail
 
+# Xcode rejects a macOS deployment floor inherited by an iOS build. Scope each Rust build's
+# floor below so its crypto C/assembly objects match the platform it will actually run on.
+unset MACOSX_DEPLOYMENT_TARGET IPHONEOS_DEPLOYMENT_TARGET
+
 cd "$(dirname "$0")/.."
 RUN=${1:-}
 GENERATED=apps/shared/ServerGlassFFI/generated
@@ -15,7 +19,7 @@ SIM_TARGET=aarch64-apple-ios-sim
 DEVICE=${SG_SIM_DEVICE:-iPhone 17 Pro}
 
 echo "==> building sg-ffi for $SIM_TARGET"
-cargo build -p sg-ffi --target "$SIM_TARGET"
+IPHONEOS_DEPLOYMENT_TARGET=18.0 cargo build -p sg-ffi --target "$SIM_TARGET"
 
 # Xcode resolves -lsg_ffi from one directory, so the slice for the SDK being built goes there.
 mkdir -p target/ios
@@ -24,7 +28,7 @@ cp "target/$SIM_TARGET/debug/libsg_ffi.a" target/ios/libsg_ffi.a
 echo "==> generating Swift bindings"
 # Generated from the host-architecture dylib: the metadata uniffi-bindgen reads is
 # architecture-independent, and a simulator .a has no dylib to introspect.
-cargo build -p sg-ffi
+MACOSX_DEPLOYMENT_TARGET=14.0 cargo build -p sg-ffi
 # `--bin` is not optional: the crate also ships a C# generator for the Windows app, so
 # an unqualified `cargo run` is ambiguous and fails.
 cargo run -q -p sg-bindgen --bin uniffi-bindgen -- generate \

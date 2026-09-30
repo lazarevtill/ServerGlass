@@ -17,6 +17,18 @@ import org.junit.Test
  * Runs on the JVM: a test that needs an emulator is a test that does not run.
  */
 class HostStoreTest {
+    @Test
+    fun `out of range ports cannot wrap to another server port`() {
+        val valid = HostStore.encode(listOf(sample()))
+        for (port in listOf(-1, 0, 65536, 67758)) {
+            assertTrue(HostStore.decode(valid.replace("2222", port.toString())).isEmpty())
+        }
+    }
+
+    @Test(expected = Exception::class)
+    fun `the application load path reports corruption instead of overwriting it`() {
+        HostStore.decodeChecked("{ damaged inventory")
+    }
 
     private fun sample(id: String = "abc-123") = HostStore.SavedHost(
         id = id,

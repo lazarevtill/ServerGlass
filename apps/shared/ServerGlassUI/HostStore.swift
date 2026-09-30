@@ -48,9 +48,9 @@ public enum HostStore {
         }
     }
 
-    public static func load() -> [SavedHost] {
+    public static func load() throws -> [SavedHost] {
         guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([SavedHost].self, from: data)) ?? []
+        return try JSONDecoder().decode([SavedHost].self, from: data)
     }
 
     public static func save(_ hosts: [SavedHost]) {
@@ -125,18 +125,23 @@ enum Keychain {
     /// with no passcode restricts some accessibility classes — so it has to be reportable.
     @discardableResult
     static func setSecret(_ secret: String?, for id: String, kind: Kind = .password) -> Bool {
-        removeSecret(for: id, kind: kind)
-        guard let secret, !secret.isEmpty, let data = secret.data(using: .utf8) else { return true }
+        guard let secret, !secret.isEmpty, let data = secret.data(using: .utf8) else {
+            return removeSecret(for: id, kind: kind)
+        }
 
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account(id, kind),
-            kSecValueData as String: data,
-            // Available once the device has been unlocked, and never synced to another device or
-            // into a backup: a server password should not travel with an iCloud restore.
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
+        // Updating first preserves the working credential if the Keychain refuses the new one.
+        // Delete-then-add erased it before knowing whether the replacement could be saved.
+        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        guard status == errSecItemNotFound else { return status == errSecSuccess }
+        query[kSecValueData as String] = data
+        // Available once the device has been unlocked, and never synced to another device or
+        // into a backup: a server password should not travel with an iCloud restore.
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
     }
 
@@ -155,12 +160,14 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func removeSecret(for id: String, kind: Kind = .password) {
+    @discardableResult
+    static func removeSecret(for id: String, kind: Kind = .password) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account(id, kind),
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }

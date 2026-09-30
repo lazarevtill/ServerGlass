@@ -38,7 +38,11 @@ let package = Package(
             path: "shared/ServerGlassFFI",
             sources: ["generated/sg_ffi.swift"],
             linkerSettings: [
-                .unsafeFlags(["-L\(workspaceTarget)", "-lsg_ffi"]),
+                // `-lsg_ffi` prefers the dylib Cargo also emits. Its install name contains the
+                // build machine's absolute path: an installed app then loads whatever a later
+                // build put there, including an incompatible UniFFI record layout. Link the
+                // archive explicitly so the bindings and their core ship as one executable.
+                .unsafeFlags(["\(workspaceTarget)/libsg_ffi.a"]),
                 // russh's crypto backend and the keychain reach into these.
                 .linkedFramework("Security"),
                 .linkedFramework("CoreFoundation"),

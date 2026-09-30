@@ -1,12 +1,11 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "cloud.lazarev.serverglass"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "cloud.lazarev.serverglass"
@@ -42,18 +41,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
     }
 
     sourceSets["main"].apply {
         // The Rust .so, placed here by cargo-ndk via scripts/build-android.sh.
-        jniLibs.srcDir("src/main/jniLibs")
+        jniLibs.directories.add("src/main/jniLibs")
         // The generated UniFFI bindings, kept out of the hand-written source tree.
-        java.srcDir("build/generated/uniffi")
+        kotlin.directories.add("build/generated/uniffi")
     }
 
     packaging {
@@ -86,7 +82,7 @@ dependencies {
     // The record format is pure Kotlin plus org.json, so it is tested on the JVM rather than on a
     // device: a test that needs an emulator is a test that does not run.
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20260719")
+    testImplementation("org.json:json:20260814")
 
     // Passwords and passphrases, encrypted with a key held in the Android Keystore.
     implementation("androidx.security:security-crypto:1.1.0")

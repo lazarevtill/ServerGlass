@@ -132,6 +132,9 @@ pub fn load(paths: &Paths) -> Result<Vec<SavedHost>, String> {
 /// Written to a temporary file and renamed over the target: a crash or a full disk midway through
 /// must not leave a half-written inventory where a complete one used to be.
 pub fn save(paths: &Paths, hosts: &[SavedHost]) -> Result<(), String> {
+    // Never turn a failed restore into permanent loss when the next Add or pairing saves.
+    // The original file remains available for repair instead of being replaced by an empty list.
+    load(paths)?;
     if let Some(dir) = paths.config.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
@@ -209,6 +212,8 @@ mod tests {
         // Returning Ok(vec![]) here would be indistinguishable from "the app forgot every server
         // you added", which is the one outcome a person must never be left to guess at.
         assert!(load(&paths).is_err());
+        assert!(save(&paths, &[SavedHost::new("new-host")]).is_err());
+        assert_eq!(std::fs::read(&paths.config).unwrap(), b"{ this is not json");
     }
 
     #[test]

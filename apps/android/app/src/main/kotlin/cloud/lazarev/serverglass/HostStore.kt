@@ -38,37 +38,40 @@ class HostStore(context: Context) {
     private val config: SharedPreferences =
         context.getSharedPreferences("sg.hosts", Context.MODE_PRIVATE)
 
-    /**
-     * Falls back to plain preferences if the Keystore is unavailable.
-     *
-     * `EncryptedSharedPreferences` can fail on devices with a broken or wiped Keystore, and on some
-     * emulators. Refusing to run at all would be worse than storing a secret the way any ordinary
-     * app setting is stored — but the distinction is recorded so the UI can say which happened
-     * rather than implying protection it does not have.
-     */
-    var secretsAreHardwareBacked: Boolean = true
-        private set
-
-    private val secrets: SharedPreferences = try {
+    // A broken vault must never silently turn passwords and private keys into plain preferences.
+    private val secrets: SharedPreferences? = try {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
-        EncryptedSharedPreferences.create(
+        val encrypted = EncryptedSharedPreferences.create(
             context,
             "sg.secrets",
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         )
+        // Upgrade the old fallback only after a durable encrypted write. Until then the original
+        // remains recoverable; an unavailable Keystore must not erase someone's credentials.
+        val legacy = context.getSharedPreferences("sg.secrets.plain", Context.MODE_PRIVATE)
+        if (legacy.all.isNotEmpty()) {
+            val edit = encrypted.edit()
+            legacy.all.forEach { (key, value) ->
+                if (value is String && !encrypted.contains(key)) edit.putString(key, value)
+            }
+            check(edit.commit()) { "The sign-in details could not be moved to secure storage." }
+            check(legacy.edit().clear().commit()) { "The old sign-in storage could not be cleared." }
+        }
+        encrypted
     } catch (_: Exception) {
-        secretsAreHardwareBacked = false
-        context.getSharedPreferences("sg.secrets.plain", Context.MODE_PRIVATE)
+        null
     }
 
-    fun load(): List<SavedHost> = decode(config.getString(KEY, null))
+    val secureStorageAvailable: Boolean get() = secrets != null
+
+    fun load(): List<SavedHost> = decodeChecked(config.getString(KEY, null))
 
     fun save(hosts: List<SavedHost>) {
-        config.edit().putString(KEY, encode(hosts)).apply()
+        check(config.edit().putString(KEY, encode(hosts)).commit()) { "The server list could not be saved." }
     }
 
     /** Which secret. A host can have both — a pasted key *and* the passphrase protecting it. */
@@ -78,13 +81,20 @@ class HostStore(context: Context) {
     }
 
     fun secret(id: String, kind: Kind = Kind.PASSWORD): String? =
-        secrets.getString(id + kind.suffix, null)?.ifEmpty { null }
+        secrets?.getString(id + kind.suffix, null)?.ifEmpty { null }
 
-    fun setSecret(id: String, secret: String?, kind: Kind = Kind.PASSWORD) {
-        val account = id + kind.suffix
-        secrets.edit().apply {
-            if (secret.isNullOrEmpty()) remove(account) else putString(account, secret)
-        }.apply()
+    fun setSecrets(id: String, secret: String?, keyText: String?) {
+        if (secret == null && keyText == null) return
+        val vault = checkNotNull(secrets) { "This device's secure storage is unavailable. The sign-in details were not saved." }
+        val edit = vault.edit()
+        fun put(account: String, value: String?) {
+            if (value != null) {
+                if (value.isEmpty()) edit.remove(account) else edit.putString(account, value)
+            }
+        }
+        put(id, secret)
+        put(id + Kind.KEY_TEXT.suffix, keyText)
+        check(edit.commit()) { "The sign-in details could not be saved." }
     }
 
     /**
@@ -102,7 +112,7 @@ class HostStore(context: Context) {
     /** Remove a host's stored record and its secret together. */
     fun forget(id: String) {
         save(load().filterNot { it.id == id })
-        secrets.edit().remove(id).remove(id + Kind.KEY_TEXT.suffix).apply()
+        secrets?.edit()?.remove(id)?.remove(id + Kind.KEY_TEXT.suffix)?.apply()
     }
 
     companion object {
@@ -138,27 +148,30 @@ class HostStore(context: Context) {
         /**
          * Anything unreadable yields an empty list rather than a crash.
          *
-         * A record written by a future version, or a file truncated by a device losing power
-         * mid-write, must cost the user their list — not the ability to open the app at all.
+         * For previews and callers that only need a best-effort list. Persistence uses
+         * decodeChecked so a damaged inventory is reported and cannot be silently overwritten.
          */
-        fun decode(raw: String?): List<SavedHost> {
+        fun decode(raw: String?): List<SavedHost> = runCatching { decodeChecked(raw) }.getOrDefault(emptyList())
+
+        internal fun decodeChecked(raw: String?): List<SavedHost> {
             if (raw.isNullOrEmpty()) return emptyList()
-            return runCatching {
-                val array = JSONArray(raw)
-                (0 until array.length()).map { index ->
-                    val o = array.getJSONObject(index)
-                    SavedHost(
-                        id = o.getString("id"),
-                        address = o.getString("address"),
-                        port = o.getInt("port").toUShort(),
-                        user = o.getString("user"),
-                        authKind = o.getString("authKind"),
-                        keyPath = o.optString("keyPath").ifEmpty { null },
-                        hostKeyPolicy = o.getString("hostKeyPolicy"),
-                        refreshMs = o.getLong("refreshMs").toULong(),
-                    )
-                }
-            }.getOrDefault(emptyList())
+            val array = JSONArray(raw)
+            return (0 until array.length()).map { index ->
+                val o = array.getJSONObject(index)
+                val port = o.getInt("port")
+                val refresh = o.getLong("refreshMs")
+                require(port in 1..65535 && refresh > 0) { "Invalid saved connection settings" }
+                SavedHost(
+                    id = o.getString("id"),
+                    address = o.getString("address"),
+                    port = port.toUShort(),
+                    user = o.getString("user"),
+                    authKind = o.getString("authKind"),
+                    keyPath = o.optString("keyPath").ifEmpty { null },
+                    hostKeyPolicy = o.getString("hostKeyPolicy"),
+                    refreshMs = refresh.toULong(),
+                )
+            }
         }
     }
 }

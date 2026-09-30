@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,11 +52,11 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
     var showTechnical by mutableStateOf(false)
         private set
 
-    /** False when the Keystore was unavailable and secrets fell back to plain preferences. */
-    val secretsAreHardwareBacked: Boolean get() = store.secretsAreHardwareBacked
+    val secureStorageAvailable: Boolean get() = store.secureStorageAvailable
+    var lastError by mutableStateOf<String?>(null)
 
     /** Secrets for hosts that were deliberately not saved. */
-    private val ephemeralSecrets = mutableMapOf<String, String?>()
+    private val ephemeralSecrets = mutableMapOf<String, Pair<String?, String?>>()
 
     init {
         viewModelScope.launch {
@@ -70,7 +71,22 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
 
     /** Reconnect everything added in a previous session. */
     private fun restore() {
-        store.load().forEach { start(it) }
+        reportFailure { store.load().forEach { start(it) } }
+    }
+
+    private inline fun reportFailure(action: () -> Unit): Boolean = try {
+        action()
+        true
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        lastError = error.message ?: "The server settings could not be saved or opened."
+        false
+    }
+
+    override fun onCleared() {
+        core.destroy()
+        super.onCleared()
     }
 
     /**
@@ -80,40 +96,45 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
      * only for as long as building the config takes.
      */
     private fun start(saved: HostStore.SavedHost, selectWhenReady: Boolean = false) {
-        val config = TargetConfig(
-            host = saved.address,
-            port = saved.port,
-            user = saved.user,
-            authKind = saved.authKind,
-            keyPath = saved.keyPath,
-            // A pasted key is key material, so it comes from the encrypted store rather than the
-            // record, exactly like the passphrase beside it.
-            keyText = store.secret(saved.id, HostStore.Kind.KEY_TEXT),
-            secret = if (ephemeralSecrets.containsKey(saved.id)) {
-                ephemeralSecrets[saved.id]
-            } else {
-                store.secret(saved.id)
-            },
-            hostKeyPolicy = saved.hostKeyPolicy,
-            knownHostsPath = knownHosts,
-            refreshMs = saved.refreshMs,
-        )
+        reportFailure {
+            val config = TargetConfig(
+                host = saved.address,
+                port = saved.port,
+                user = saved.user,
+                authKind = saved.authKind,
+                keyPath = saved.keyPath,
+                // A pasted key is key material, so it comes from the encrypted store rather than the
+                // record, exactly like the passphrase beside it.
+                keyText = if (ephemeralSecrets.containsKey(saved.id)) ephemeralSecrets[saved.id]?.second
+                    else store.secret(saved.id, HostStore.Kind.KEY_TEXT),
+                secret = if (ephemeralSecrets.containsKey(saved.id)) {
+                    ephemeralSecrets[saved.id]?.first
+                } else {
+                    store.secret(saved.id)
+                },
+                hostKeyPolicy = saved.hostKeyPolicy,
+                knownHostsPath = knownHosts,
+                refreshMs = saved.refreshMs,
+            )
 
-        viewModelScope.launch {
-            val id = withContext(Dispatchers.IO) {
-                val id = core.addTarget(config)
-                core.start(id)
-                id
+            viewModelScope.launch {
+                reportFailure {
+                    val id = withContext(Dispatchers.IO) {
+                        val id = core.addTarget(config)
+                        core.start(id)
+                        id
+                    }
+                    // Deliberately does not select the new host. On a phone `selection` means "the user
+                    // navigated into a server" and the detail screen replaces the list, so selecting
+                    // automatically would drop someone into detail on launch with the list — and the Add
+                    // button with it — out of reach. Two-pane layouts, where the list never leaves the
+                    // screen, opt into a default selection themselves.
+                    hosts = hosts + Host(id, "${saved.user}@${saved.address}", core.snapshot(id), saved.id)
+                    // Only after an edit, so someone watching a host stays on it rather than being sent
+                    // back to the list by their own change.
+                    if (selectWhenReady) selection = id
+                }
             }
-            // Deliberately does not select the new host. On a phone `selection` means "the user
-            // navigated into a server" and the detail screen replaces the list, so selecting
-            // automatically would drop someone into detail on launch with the list — and the Add
-            // button with it — out of reach. Two-pane layouts, where the list never leaves the
-            // screen, opt into a default selection themselves.
-            hosts = hosts + Host(id, "${saved.user}@${saved.address}", core.snapshot(id), saved.id)
-            // Only after an edit, so someone watching a host stays on it rather than being sent
-            // back to the list by their own change.
-            if (selectWhenReady) selection = id
         }
     }
 
@@ -129,7 +150,7 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
         refreshMs: ULong = 1000UL,
         /** False for the development demo host, which would otherwise be saved on every launch. */
         persist: Boolean = true,
-    ) {
+    ): Boolean {
         val saved = HostStore.SavedHost(
             id = UUID.randomUUID().toString(),
             address = address,
@@ -143,29 +164,34 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
 
         if (persist) {
             // The secret goes to the encrypted store and nowhere else; the record never carries it.
-            store.setSecret(saved.id, secret?.takeIf { it.isNotBlank() })
-            store.setSecret(saved.id, keyText?.takeIf { it.isNotBlank() }, HostStore.Kind.KEY_TEXT)
-            store.save(store.load() + saved)
+            if (!reportFailure {
+                val stored = store.load()
+                store.setSecrets(saved.id, secret?.takeIf { it.isNotEmpty() }, keyText?.takeIf { it.isNotEmpty() })
+                store.save(stored + saved)
+            }) return false
         } else {
             // Not saved, so the secret has to travel in memory rather than through the Keystore.
-            ephemeralSecrets[saved.id] = secret?.takeIf { it.isNotBlank() }
+            ephemeralSecrets[saved.id] = secret to keyText
         }
 
         start(saved)
+        return true
     }
 
     fun removeHost(id: String) {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { core.removeTarget(id) }
-            // Forget the stored record and its secret too, or the host returns on the next launch
-            // and its password is left behind in the Keystore.
-            hosts.firstOrNull { it.id == id }?.savedId?.takeIf { it.isNotEmpty() }
-                ?.let { savedId ->
-                    store.forget(savedId)
-                    ephemeralSecrets.remove(savedId)
-                }
-            hosts = hosts.filterNot { it.id == id }
-            if (selection == id) selection = hosts.firstOrNull()?.id
+            reportFailure {
+                withContext(Dispatchers.IO) { core.removeTarget(id) }
+                // Forget the stored record and its secret too, or the host returns on the next launch
+                // and its password is left behind in the Keystore.
+                hosts.firstOrNull { it.id == id }?.savedId?.takeIf { it.isNotEmpty() }
+                    ?.let { savedId ->
+                        store.forget(savedId)
+                        ephemeralSecrets.remove(savedId)
+                    }
+                hosts = hosts.filterNot { it.id == id }
+                if (selection == id) selection = hosts.firstOrNull()?.id
+            }
         }
     }
 
@@ -193,11 +219,12 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
         secret: String?,
         trustOnFirstUse: Boolean,
         refreshMs: ULong = 1000UL,
-    ) {
-        val savedId = hosts.firstOrNull { it.id == id }?.savedId ?: return
-        val stored = store.load().toMutableList()
+    ): Boolean {
+        val savedId = hosts.firstOrNull { it.id == id }?.savedId ?: return false
+        val stored = mutableListOf<HostStore.SavedHost>()
+        if (!reportFailure { stored.addAll(store.load()) }) return false
         val index = stored.indexOfFirst { it.id == savedId }
-        if (index < 0) return
+        if (index < 0) return false
 
         stored[index] = HostStore.SavedHost(
             id = savedId,
@@ -209,25 +236,31 @@ class CoreModel(application: Application) : AndroidViewModel(application) {
             hostKeyPolicy = if (trustOnFirstUse) "accept_new" else "strict",
             refreshMs = refreshMs,
         )
-        store.save(stored)
-        secret?.let { store.setSecret(savedId, it.takeIf(String::isNotBlank)) }
-        keyText?.let { store.setSecret(savedId, it.takeIf(String::isNotBlank), HostStore.Kind.KEY_TEXT) }
+        if (!reportFailure {
+            store.setSecrets(savedId, secret, keyText)
+            store.save(stored)
+        }) return false
 
         viewModelScope.launch {
-            // Not removeHost: that would also erase the record and its secrets, the very things
-            // being kept.
-            withContext(Dispatchers.IO) { core.removeTarget(id) }
-            val wasSelected = selection == id
-            hosts = hosts.filterNot { it.id == id }
-            if (wasSelected) selection = null
-            start(stored[index], selectWhenReady = wasSelected)
+            reportFailure {
+                // Not removeHost: that would also erase the record and its secrets, the very things
+                // being kept.
+                withContext(Dispatchers.IO) { core.removeTarget(id) }
+                val wasSelected = selection == id
+                hosts = hosts.filterNot { it.id == id }
+                if (wasSelected) selection = null
+                start(stored[index], selectWhenReady = wasSelected)
+            }
         }
+        return true
     }
 
     /** The saved record behind a live host, for populating an edit form. */
     fun saved(id: String): HostStore.SavedHost? {
         val savedId = hosts.firstOrNull { it.id == id }?.savedId ?: return null
-        return store.load().firstOrNull { it.id == savedId }
+        var saved: HostStore.SavedHost? = null
+        reportFailure { saved = store.load().firstOrNull { it.id == savedId } }
+        return saved
     }
 
     /**

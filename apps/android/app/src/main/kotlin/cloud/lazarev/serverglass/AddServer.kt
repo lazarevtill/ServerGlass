@@ -102,7 +102,7 @@ fun AddServerDialog(
         "key_text" -> keyText.isNotBlank()
         else -> secret.isNotBlank()
     }
-    val valid = address.isNotBlank() && user.isNotBlank() && port.toUShortOrNull() != null &&
+    val valid = address.isNotBlank() && user.isNotBlank() && (port.toIntOrNull() ?: 0) in 1..65535 &&
         (credentialGiven || isEditing)
 
     Dialog(
@@ -128,14 +128,11 @@ fun AddServerDialog(
                 color = Theme.secondary,
                 fontSize = 13.sp,
             )
-            if (!model.secretsAreHardwareBacked) {
-                // Computed since the vault landed and shown nowhere, which made a real weakening
-                // of the storage invisible: on a device whose Keystore is unavailable the password
-                // is kept like any ordinary app setting.
+            if (!model.secureStorageAvailable) {
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "This device's secure storage is unavailable, so a password or key is saved " +
-                        "like any other app setting rather than encrypted. Consider a key file.",
+                    "This device's secure storage is unavailable. Passwords and pasted keys " +
+                        "cannot be saved. You can use a key file without a passphrase.",
                     color = Theme.warn,
                     fontSize = 11.5.sp,
                 )
@@ -273,7 +270,7 @@ fun AddServerDialog(
                         val path = if (authKind == "key") keyPath.trim() else null
                         val key = if (authKind == "key_text") keyText.trim() else null
 
-                        if (editing != null) {
+                        val succeeded = if (editing != null) {
                             model.updateHost(
                                 id = editing,
                                 address = address.trim(),
@@ -300,7 +297,7 @@ fun AddServerDialog(
                                 trustOnFirstUse = trustOnFirstUse,
                             )
                         }
-                        onDismiss()
+                        if (succeeded) onDismiss()
                     },
                     enabled = valid,
                     modifier = Modifier.weight(1f),

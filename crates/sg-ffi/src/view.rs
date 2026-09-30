@@ -231,6 +231,19 @@ pub struct TargetSnapshot {
 }
 
 impl TargetSnapshot {
+    /// State and verdict are one published value. Otherwise a disconnected host can keep saying
+    /// "Everything looks good" indefinitely, including on every platform's summary screen.
+    pub(crate) fn set_state(&mut self, state: ConnectionState) {
+        let mut all = self.gauges.clone();
+        all.extend(
+            self.detail_groups
+                .iter()
+                .flat_map(|group| group.gauges.iter().cloned()),
+        );
+        self.health = crate::plain::assess(&state, &all, !all.is_empty());
+        self.state = state;
+    }
+
     /// A snapshot for a target that has produced nothing yet.
     pub fn placeholder(target_id: &str, host: &str, state: ConnectionState) -> Self {
         let state_for_placeholder = state.clone();

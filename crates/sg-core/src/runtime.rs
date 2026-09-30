@@ -131,7 +131,13 @@ impl TargetRuntime {
             }
         };
 
-        let responses = session.batch(&sg_transport::probe::requests()).await?;
+        let responses = match session.batch(&sg_transport::probe::requests()).await {
+            Ok(responses) => responses,
+            Err(error) => {
+                self.on_disconnect(&error);
+                return Err(error);
+            }
+        };
         let caps = sg_transport::probe::parse(&responses);
 
         // Prefer the host's own idea of its name over whatever the user typed into the address
@@ -192,6 +198,7 @@ impl TargetRuntime {
             tick.descriptors.clone(),
             &tick.samples,
         );
+        self.store.retain_series(&tick.descriptors);
         // Prune anything that stopped being reported — a stopped container must leave the
         // dashboard rather than sitting there with its last reading frozen.
         let mut present = tick.entity_ids();

@@ -48,13 +48,12 @@ public sealed unsafe class ServerGlassCore : IDisposable
         PropertyNameCaseInsensitive = true,
     };
 
-    private void* _handle;
-    private bool _disposed;
+    private readonly CoreHandle _handle;
 
     public ServerGlassCore()
     {
-        _handle = Native.sg_core_new();
-        if (_handle is null)
+        _handle = new CoreHandle(Native.sg_core_new());
+        if (_handle.IsInvalid)
         {
             throw new SgException("internal", "The ServerGlass core could not be started.", false);
         }
@@ -67,50 +66,58 @@ public sealed unsafe class ServerGlassCore : IDisposable
     /// <summary>Register a host. Does not connect; call <see cref="Start"/> for that.</summary>
     public string AddTarget(TargetConfig config)
     {
+        using var lease = new CoreLease(_handle);
         var json = Utf8(JsonSerializer.Serialize(config, Json));
         fixed (byte* p = json)
         {
-            return Read<string>(Native.sg_add_target(Handle, p));
+            return Read<string>(Native.sg_add_target(lease.Pointer, p));
         }
     }
 
     /// <summary>Connect and begin refreshing. Returns immediately; watch the snapshot for progress.</summary>
     public void Start(string targetId)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* p = Utf8(targetId))
         {
-            ReadVoid(Native.sg_start(Handle, p));
+            ReadVoid(Native.sg_start(lease.Pointer, p));
         }
     }
 
     /// <summary>Stop refreshing and drop the connection.</summary>
     public void Stop(string targetId)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* p = Utf8(targetId))
         {
-            ReadVoid(Native.sg_stop(Handle, p));
+            ReadVoid(Native.sg_stop(lease.Pointer, p));
         }
     }
 
     public void RemoveTarget(string targetId)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* p = Utf8(targetId))
         {
-            ReadVoid(Native.sg_remove_target(Handle, p));
+            ReadVoid(Native.sg_remove_target(lease.Pointer, p));
         }
     }
 
     /// <summary>The most recent completed refresh. Cheap enough to call on a display timer.</summary>
     public TargetSnapshot Snapshot(string targetId)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* p = Utf8(targetId))
         {
-            return Read<TargetSnapshot>(Native.sg_snapshot(Handle, p));
+            return Read<TargetSnapshot>(Native.sg_snapshot(lease.Pointer, p));
         }
     }
 
-    public IReadOnlyList<string> TargetIds() =>
-        Read<List<string>>(Native.sg_target_ids(Handle));
+    public IReadOnlyList<string> TargetIds()
+    {
+        using var lease = new CoreLease(_handle);
+        return Read<List<string>>(Native.sg_target_ids(lease.Pointer));
+    }
 
     /// <summary>
     /// Run one command on the host and wait for what it printed.
@@ -122,10 +129,11 @@ public sealed unsafe class ServerGlassCore : IDisposable
     /// </remarks>
     public CommandResult RunCommand(string targetId, string command)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* id = Utf8(targetId))
         fixed (byte* cmd = Utf8(command))
         {
-            return Read<CommandResult>(Native.sg_run_command(Handle, id, cmd));
+            return Read<CommandResult>(Native.sg_run_command(lease.Pointer, id, cmd));
         }
     }
 
@@ -138,9 +146,10 @@ public sealed unsafe class ServerGlassCore : IDisposable
 
     public string Format(double value, string unitSuffix, bool binaryScaled)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* unit = Utf8(unitSuffix))
         {
-            return Read<string>(Native.sg_format(Handle, value, unit, binaryScaled));
+            return Read<string>(Native.sg_format(lease.Pointer, value, unit, binaryScaled));
         }
     }
 
@@ -157,8 +166,11 @@ public sealed unsafe class ServerGlassCore : IDisposable
             ? FormatDuration(gauge.Value)
             : Format(gauge.Value, gauge.UnitSuffix, gauge.BinaryScaled);
 
-    public string FormatDuration(double seconds) =>
-        Read<string>(Native.sg_format_duration(Handle, seconds));
+    public string FormatDuration(double seconds)
+    {
+        using var lease = new CoreLease(_handle);
+        return Read<string>(Native.sg_format_duration(lease.Pointer, seconds));
+    }
 
     /// <summary>
     /// Normalise a series to 0-1 for a sparkline, oldest first.
@@ -171,6 +183,7 @@ public sealed unsafe class ServerGlassCore : IDisposable
     /// </remarks>
     public IReadOnlyList<double> SparklinePoints(IReadOnlyList<double> history)
     {
+        using var lease = new CoreLease(_handle);
         if (history.Count == 0)
         {
             return [];
@@ -178,7 +191,7 @@ public sealed unsafe class ServerGlassCore : IDisposable
 
         fixed (byte* p = Utf8(JsonSerializer.Serialize(history, Json)))
         {
-            return Read<List<double>>(Native.sg_sparkline_points(Handle, p));
+            return Read<List<double>>(Native.sg_sparkline_points(lease.Pointer, p));
         }
     }
 
@@ -196,9 +209,10 @@ public sealed unsafe class ServerGlassCore : IDisposable
     /// </param>
     public ReceiverStarted StartReceiving(IReadOnlyList<string> advertiseHosts)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* p = Utf8(JsonSerializer.Serialize(advertiseHosts, Json)))
         {
-            return Read<ReceiverStarted>(Native.sg_start_receiving(Handle, p));
+            return Read<ReceiverStarted>(Native.sg_start_receiving(lease.Pointer, p));
         }
     }
 
@@ -211,32 +225,44 @@ public sealed unsafe class ServerGlassCore : IDisposable
     /// security of the exchange rests on that comparison happening first, which is why it is two
     /// calls and not one.
     /// </remarks>
-    public string AwaitPairingConnection(ulong id) =>
-        Read<string>(Native.sg_receiver_await_connection(Handle, id));
+    public string AwaitPairingConnection(ulong id)
+    {
+        using var lease = new CoreLease(_handle);
+        return Read<string>(Native.sg_receiver_await_connection(lease.Pointer, id));
+    }
 
     /// <summary>Take the transfer. Call only after the user confirmed the codes match.</summary>
-    public SyncBundle ReceivePairing(ulong id) =>
-        Read<SyncBundle>(Native.sg_receiver_receive(Handle, id));
+    public SyncBundle ReceivePairing(ulong id)
+    {
+        using var lease = new CoreLease(_handle);
+        return Read<SyncBundle>(Native.sg_receiver_receive(lease.Pointer, id));
+    }
 
     /// <summary>Connect to a pairing code from the other device. Nothing is sent yet.</summary>
     public SenderConnected ScanPairingCode(string code)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* p = Utf8(code))
         {
-            return Read<SenderConnected>(Native.sg_scan_pairing_code(Handle, p));
+            return Read<SenderConnected>(Native.sg_scan_pairing_code(lease.Pointer, p));
         }
     }
 
     /// <summary>Send the bundle. Call only after the user confirmed the codes match.</summary>
     public void SendPairing(ulong id, SyncBundle bundle)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* p = Utf8(JsonSerializer.Serialize(bundle, Json)))
         {
-            ReadVoid(Native.sg_sender_send(Handle, id, p));
+            ReadVoid(Native.sg_sender_send(lease.Pointer, id, p));
         }
     }
 
-    public void ForgetPairing(ulong id) => Native.sg_pairing_forget(Handle, id);
+    public void ForgetPairing(ulong id)
+    {
+        using var lease = new CoreLease(_handle);
+        Native.sg_pairing_forget(lease.Pointer, id);
+    }
 
     /// <summary>
     /// Apply a received bundle to what this device already has.
@@ -248,10 +274,11 @@ public sealed unsafe class ServerGlassCore : IDisposable
     /// </remarks>
     public MergeResult MergeBundle(SyncBundle existing, SyncBundle incoming)
     {
+        using var lease = new CoreLease(_handle);
         fixed (byte* a = Utf8(JsonSerializer.Serialize(existing, Json)))
         fixed (byte* b = Utf8(JsonSerializer.Serialize(incoming, Json)))
         {
-            return Read<MergeResult>(Native.sg_merge_bundle(Handle, a, b));
+            return Read<MergeResult>(Native.sg_merge_bundle(lease.Pointer, a, b));
         }
     }
 
@@ -259,10 +286,37 @@ public sealed unsafe class ServerGlassCore : IDisposable
     // Plumbing
     // -----------------------------------------------------------------------------------------
 
-    private void* Handle =>
-        _disposed
-            ? throw new ObjectDisposedException(nameof(ServerGlassCore))
-            : _handle;
+    /// SafeHandle keeps the Rust allocation alive until every in-flight native call returns.
+    /// Checking a boolean before a call is insufficient: closing the window can free the core
+    /// between that check and an SSH command or snapshot running on a worker thread.
+    private sealed class CoreHandle : SafeHandle
+    {
+        public CoreHandle(void* pointer) : base(IntPtr.Zero, ownsHandle: true) => SetHandle((IntPtr)pointer);
+        public override bool IsInvalid => handle == IntPtr.Zero;
+        protected override bool ReleaseHandle()
+        {
+            Native.sg_core_free((void*)handle);
+            return true;
+        }
+    }
+
+    private sealed class CoreLease : IDisposable
+    {
+        private readonly CoreHandle _owner;
+        private bool _acquired;
+        public CoreLease(CoreHandle owner)
+        {
+            _owner = owner;
+            owner.DangerousAddRef(ref _acquired);
+        }
+        public void* Pointer => (void*)_owner.DangerousGetHandle();
+        public void Dispose()
+        {
+            if (!_acquired) return;
+            _acquired = false;
+            _owner.DangerousRelease();
+        }
+    }
 
     /// <summary>A string as NUL-terminated UTF-8, ready to pin.</summary>
     private static byte[] Utf8(string text)
@@ -328,17 +382,5 @@ public sealed unsafe class ServerGlassCore : IDisposable
             error.TryGetProperty("recoverable", out var recoverable) && recoverable.GetBoolean());
     }
 
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        var handle = _handle;
-        _handle = null;
-        // Drops every target's poll loop with it.
-        Native.sg_core_free(handle);
-    }
+    public void Dispose() => _handle.Dispose();
 }

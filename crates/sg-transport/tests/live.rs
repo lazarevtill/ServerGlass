@@ -80,6 +80,76 @@ macro_rules! session_or_skip {
 }
 
 #[tokio::test]
+async fn commands_cannot_consume_the_framing_script_from_stdin() {
+    for port in [DEBIAN_PORT, ALPINE_PORT] {
+        let mut session = session_or_skip!(port);
+        let cat = Request::exec(["cat"]);
+        let next = Request::exec(["printf", "still framed"]);
+        let responses = session
+            .batch(&[cat.clone(), next.clone()])
+            .await
+            .expect("batch");
+        assert_eq!(responses.text(&cat), Some(""));
+        assert_eq!(responses.text(&next), Some("still framed"));
+    }
+}
+
+#[tokio::test]
+async fn streaming_output_does_not_extend_the_batch_deadline() {
+    if !fixture_up(DEBIAN_PORT).await {
+        return;
+    }
+    let mut config = spec(DEBIAN_PORT);
+    config.batch_timeout_ms = 200;
+    let mut session = SshSession::connect(config).await.expect("connect");
+    let request = Request::exec(["sh", "-c", "while :; do printf x; sleep 0.05; done"]);
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(Duration::from_secs(3), session.batch(&[request]))
+        .await
+        .expect("absolute deadline");
+    assert!(matches!(
+        result,
+        Err(sg_transport::TransportError::Timeout { .. })
+    ));
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn excessive_output_is_bounded() {
+    if !fixture_up(DEBIAN_PORT).await {
+        return;
+    }
+    let mut session = session_or_skip!(DEBIAN_PORT);
+    let result = session
+        .batch(&[Request::exec(["head", "-c", "18000000", "/dev/zero"])])
+        .await;
+    assert!(matches!(
+        result,
+        Err(sg_transport::TransportError::OutputTooLarge { .. })
+    ));
+}
+
+#[tokio::test]
+async fn an_unwritable_pin_is_a_visible_nonrecoverable_failure() {
+    if !fixture_up(DEBIAN_PORT).await {
+        return;
+    }
+    // A directory is readable but cannot be used as a pin file, on Unix and Windows alike.
+    let config = spec(DEBIAN_PORT)
+        .known_hosts(std::env::temp_dir())
+        .host_key_policy(HostKeyPolicy::AcceptNew);
+    let error = SshSession::connect(config)
+        .await
+        .err()
+        .expect("must not connect without a pin");
+    assert!(matches!(
+        error,
+        sg_transport::TransportError::HostKeyStorage { .. }
+    ));
+    assert!(!error.is_transient());
+}
+
+#[tokio::test]
 async fn reads_proc_files_over_one_channel() {
     let mut session = session_or_skip!(DEBIAN_PORT);
 
@@ -347,12 +417,11 @@ async fn trusting_a_host_on_first_use_actually_records_its_key() {
     if !fixture_up(DEBIAN_PORT).await {
         return;
     }
-    // A private HOME, so this neither reads nor writes the developer's own known_hosts.
+    // A dedicated pin path. Changing HOME here races the other tests and library threads.
     let home = std::env::temp_dir().join(format!("sg-known-hosts-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).expect("temp home");
-    // SAFETY: single-threaded test process; russh reads HOME when it resolves known_hosts.
-    unsafe { std::env::set_var("HOME", &home) };
+    let recorded = home.join(".ssh").join("known_hosts");
 
     let spec = ConnectionSpec::new("127.0.0.1", "root")
         .port(DEBIAN_PORT)
@@ -360,12 +429,12 @@ async fn trusting_a_host_on_first_use_actually_records_its_key() {
             path: fixture_key(),
             passphrase: None,
         })
-        .host_key_policy(HostKeyPolicy::AcceptNew);
+        .host_key_policy(HostKeyPolicy::AcceptNew)
+        .known_hosts(&recorded);
 
     let session = SshSession::connect(spec).await.expect("connect");
     drop(session);
 
-    let recorded = home.join(".ssh").join("known_hosts");
     assert!(
         recorded.exists(),
         "the host key was not written to {}",

@@ -6,6 +6,7 @@
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{timeout, timeout_at, Duration, Instant};
 
 use crate::pairing::{Handshake, Offer, Session};
 use crate::SyncError;
@@ -19,8 +20,10 @@ const MAX_TRANSFER: usize = 1 << 20;
 /// A device showing a QR and waiting for the other to connect.
 pub struct Listener {
     listener: TcpListener,
+    listener_v6: Option<TcpListener>,
     handshake: Handshake,
     offer: Offer,
+    expires_at: Instant,
 }
 
 impl Listener {
@@ -32,8 +35,8 @@ impl Listener {
     /// device is, and a device on WireGuard or Tailscale is often reachable at *only* the tunnel
     /// address.
     ///
-    /// The socket itself binds `0.0.0.0`, so it is listening on every interface regardless; the
-    /// list only decides what the other device is told to dial.
+    /// Listen on both address families when requested. Separate sockets avoid depending on the
+    /// operating system's default for IPv4-mapped IPv6 sockets.
     pub async fn bind(advertise_hosts: &[String]) -> Result<Self, SyncError> {
         if advertise_hosts.is_empty() {
             return Err(SyncError::Transfer(
@@ -47,24 +50,45 @@ impl Listener {
             .local_addr()
             .map_err(|e| SyncError::Transfer(e.to_string()))?
             .port();
+        let listener_v6 = if advertise_hosts.iter().any(|host| host.contains(':')) {
+            TcpListener::bind("[::]:0").await.ok()
+        } else {
+            None
+        };
+        let port_v6 = listener_v6
+            .as_ref()
+            .and_then(|listener| listener.local_addr().ok())
+            .map(|address| address.port());
 
-        let addresses = advertise_hosts
+        let addresses: Vec<_> = advertise_hosts
             .iter()
-            .map(|host| {
+            .filter_map(|host| {
                 // An IPv6 literal has to be bracketed before a port is appended, or `host:port`
                 // is unparseable. A VPN handing out v6 is exactly where this bites.
-                if host.contains(':') && !host.starts_with('[') {
-                    format!("[{host}]:{port}")
+                if host.contains(':') {
+                    let port = port_v6?;
+                    Some(if host.starts_with('[') {
+                        format!("{host}:{port}")
+                    } else {
+                        format!("[{host}]:{port}")
+                    })
                 } else {
-                    format!("{host}:{port}")
+                    Some(format!("{host}:{port}"))
                 }
             })
             .collect();
+        if addresses.is_empty() {
+            return Err(SyncError::Transfer(
+                "could not listen on any of this device's network addresses".into(),
+            ));
+        }
         let (handshake, offer) = Handshake::offering(addresses);
         Ok(Listener {
             listener,
+            listener_v6,
             handshake,
             offer,
+            expires_at: Instant::now() + Duration::from_secs(crate::pairing::OFFER_TTL_SECS),
         })
     }
 
@@ -77,11 +101,28 @@ impl Listener {
     /// Returns before anything is transferred: the caller must show the verification code and get
     /// the user's confirmation first. That ordering is the point of the code.
     pub async fn accept(self) -> Result<(Session, TcpStream), SyncError> {
-        let (mut stream, _) = self
-            .listener
-            .accept()
+        let expired = || SyncError::Transfer("The pairing code expired. Create a new one.".into());
+        // timeout_at polls the future first. Reject a stale offer even if the socket and
+        // handshake bytes are queued and the exchange could complete without yielding.
+        if Instant::now() >= self.expires_at {
+            return Err(expired());
+        }
+        timeout_at(self.expires_at, self.accept_inner())
             .await
-            .map_err(|e| SyncError::Transfer(format!("no device connected: {e}")))?;
+            .map_err(|_| expired())?
+    }
+
+    async fn accept_inner(self) -> Result<(Session, TcpStream), SyncError> {
+        let accepted = if let Some(listener_v6) = &self.listener_v6 {
+            tokio::select! {
+                accepted = self.listener.accept() => accepted,
+                accepted = listener_v6.accept() => accepted,
+            }
+        } else {
+            self.listener.accept().await
+        };
+        let (mut stream, _) =
+            accepted.map_err(|e| SyncError::Transfer(format!("no device connected: {e}")))?;
 
         let mut theirs = [0u8; 32];
         stream
@@ -116,40 +157,41 @@ const PER_ADDRESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// reach a human first.
 pub async fn send_transfer(offer: &Offer) -> Result<(Session, TcpStream), SyncError> {
     let mut last: Option<String> = None;
-    let mut stream = None;
-
     for address in &offer.addresses {
-        match tokio::time::timeout(PER_ADDRESS_TIMEOUT, TcpStream::connect(address)).await {
-            Ok(Ok(connected)) => {
-                stream = Some(connected);
-                break;
+        // A TCP accept is not a successful handshake. Bound the entire exchange and keep trying
+        // candidate addresses if a VPN endpoint or unrelated listener answers but never speaks.
+        let attempt = async {
+            let mut stream = TcpStream::connect(address)
+                .await
+                .map_err(|e| SyncError::Transfer(e.to_string()))?;
+            let handshake = Handshake::accepting(offer);
+            stream
+                .write_all(&handshake.public_key())
+                .await
+                .map_err(|e| SyncError::Transfer(e.to_string()))?;
+            let mut theirs = [0u8; 32];
+            stream
+                .read_exact(&mut theirs)
+                .await
+                .map_err(|e| SyncError::Transfer(e.to_string()))?;
+            if theirs != offer.public_key {
+                return Err(SyncError::Handshake(
+                    "The device's key does not match the pairing code.".into(),
+                ));
             }
-            Ok(Err(e)) => last = Some(format!("{address}: {e}")),
+            let session = handshake.complete(theirs, false)?;
+            Ok((session, stream))
+        };
+        match timeout(PER_ADDRESS_TIMEOUT, attempt).await {
+            Ok(Ok(connected)) => return Ok(connected),
+            Ok(Err(error)) => last = Some(format!("{address}: {error}")),
             Err(_) => last = Some(format!("{address}: timed out")),
         }
     }
-
-    let mut stream = stream.ok_or_else(|| {
-        SyncError::Transfer(format!(
-            "could not reach the other device. Check both are on the same network or VPN{}",
-            last.map(|e| format!(" ({e})")).unwrap_or_default()
-        ))
-    })?;
-
-    let handshake = Handshake::accepting(offer);
-    stream
-        .write_all(&handshake.public_key())
-        .await
-        .map_err(|e| SyncError::Transfer(format!("handshake failed: {e}")))?;
-
-    let mut theirs = [0u8; 32];
-    stream
-        .read_exact(&mut theirs)
-        .await
-        .map_err(|e| SyncError::Transfer(format!("handshake failed: {e}")))?;
-
-    let session = handshake.complete(theirs, false)?;
-    Ok((session, stream))
+    Err(SyncError::Transfer(format!(
+        "could not reach the other device. Check both are on the same network or VPN{}",
+        last.map(|error| format!(" ({error})")).unwrap_or_default()
+    )))
 }
 
 /// Send the sealed payload. Call only after the user has confirmed the codes match.
@@ -158,6 +200,25 @@ pub async fn write_payload(
     stream: &mut TcpStream,
     plaintext: &[u8],
 ) -> Result<(), SyncError> {
+    timeout(
+        Duration::from_secs(30),
+        write_payload_inner(session, stream, plaintext),
+    )
+    .await
+    .map_err(|_| SyncError::Transfer("The transfer timed out. Pair the devices again.".into()))?
+}
+
+async fn write_payload_inner(
+    session: &Session,
+    stream: &mut TcpStream,
+    plaintext: &[u8],
+) -> Result<(), SyncError> {
+    // 12 bytes of nonce and 16 bytes of authentication tag count toward the wire limit.
+    if plaintext.len() > MAX_TRANSFER - 28 {
+        return Err(SyncError::Transfer(
+            "the inventory is too large to send".into(),
+        ));
+    }
     let sealed = session.seal(plaintext)?;
     let len = u32::try_from(sealed.len())
         .map_err(|_| SyncError::Transfer("the inventory is too large to send".into()))?;
@@ -179,6 +240,18 @@ pub async fn write_payload(
 
 /// Read and open the sealed payload. Call only after the user has confirmed.
 pub async fn accept_transfer(
+    session: &Session,
+    stream: &mut TcpStream,
+) -> Result<Vec<u8>, SyncError> {
+    timeout(
+        Duration::from_secs(30),
+        accept_transfer_inner(session, stream),
+    )
+    .await
+    .map_err(|_| SyncError::Transfer("The transfer timed out. Pair the devices again.".into()))?
+}
+
+async fn accept_transfer_inner(
     session: &Session,
     stream: &mut TcpStream,
 ) -> Result<Vec<u8>, SyncError> {
