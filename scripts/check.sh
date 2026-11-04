@@ -6,6 +6,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# The same deployment target build-macos.sh uses. `swift test` links target/debug/libsg_ffi.a, and
+# without this the bundled crypto library's C objects are compiled for the build machine's macOS,
+# so every link printed hundreds of "built for newer macOS version than being linked" warnings —
+# enough to bury a real one. Set here rather than in the Swift step because cargo caches the build.
+if [[ $(uname) == Darwin ]]; then
+    export MACOSX_DEPLOYMENT_TARGET=14.0
+fi
+
 step() { printf '\n==> %s\n' "$1"; }
 
 step "format";  cargo fmt --all -- --check
@@ -84,7 +92,17 @@ step "versions agree"
 if [[ "${1:-}" == "--all" ]]; then
     # No runner exists for these, so nothing but a developer checks them.
     step "swift";  swift test --package-path apps
-    step "kotlin"; (cd apps/android && gradle -q :app:testDebugUnitTest)
+    # The Kotlin bindings are gitignored and only build-android.sh wrote them, so on a fresh
+    # checkout this step failed with a wall of unresolved `uniffi` references. Generate them the
+    # same way, from the host library: the metadata is architecture-independent.
+    step "kotlin"
+    host_lib=target/debug/libsg_ffi.so
+    [[ $(uname) == Darwin ]] && host_lib=target/debug/libsg_ffi.dylib
+    cargo run -q -p sg-bindgen --bin uniffi-bindgen -- generate \
+        --library "$host_lib" \
+        --language kotlin \
+        --out-dir apps/android/app/build/generated/uniffi
+    (cd apps/android && gradle -q :app:testDebugUnitTest)
 fi
 
 printf '\nAll checks passed.\n'
